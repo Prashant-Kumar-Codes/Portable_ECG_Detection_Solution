@@ -1,547 +1,874 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ECG Arrhythmia Monitor</title>
-  <meta name="description" content="Real-time single-lead ECG arrhythmia detection using AI CNN-BiLSTM model with live waveform visualization." />
+  <title>ECG Arrhythmia Monitor — Live Telemetry & AI Diagnosis</title>
+  <meta name="description" content="Real-time single-lead ECG arrhythmia monitor using deep learning CNN-BiLSTM on live 250 Hz hardware stream." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:        #0b0d12;
-      --surface:   #13161e;
-      --border:    #1f2330;
-      --text-1:    #e8eaf0;
-      --text-2:    #8a8fa8;
-      --text-3:    #4a4f65;
-      --accent:    #3b82f6;
-      --green:     #22c55e;
-      --yellow:    #eab308;
-      --orange:    #f97316;
-      --red:       #ef4444;
-      --gray:      #6b7280;
-      --teal:      #14b8a6;
+      --bg-base:      #0c0e14;
+      --bg-surface:   #131722;
+      --bg-subtle:    #1a1f2e;
+      --border:       #242b3d;
+      --border-focus: #3b82f6;
+
+      --text-main:    #f1f5f9;
+      --text-muted:   #94a3b8;
+      --text-dim:     #64748b;
+
+      --accent-blue:  #0ea5e9;
+      --ecg-line:     #10b981;
+      --status-ok:    #22c55e;
+      --status-warn:  #f59e0b;
+      --status-err:   #ef4444;
+      --status-dim:   #475569;
     }
 
-    html, body { height: 100%; }
-
     body {
-      background: var(--bg);
-      color: var(--text-1);
-      font-family: 'Inter', system-ui, sans-serif;
-      font-size: 14px;
+      background: var(--bg-base);
+      color: var(--text-main);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 13px;
       line-height: 1.5;
       display: flex;
       flex-direction: column;
-      min-height: 100vh;
+      height: 100vh;
+      overflow: hidden;
     }
 
     /* ---- HEADER ---- */
     header {
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      height: 52px;
+      padding: 0 20px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 24px;
-      height: 56px;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
-    .header-left { display: flex; align-items: center; gap: 12px; }
-    .logo-dot {
-      width: 10px; height: 10px;
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-pulse {
+      width: 9px;
+      height: 9px;
       border-radius: 50%;
-      background: var(--teal);
-      box-shadow: 0 0 8px var(--teal);
-      animation: pulse 2s ease-in-out infinite;
+      background: var(--ecg-line);
+      box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+      animation: heartPulse 1.8s ease-in-out infinite;
     }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50%       { opacity: 0.5; transform: scale(0.8); }
+    @keyframes heartPulse {
+      0%, 100% { opacity: 0.9; transform: scale(1); }
+      50%      { opacity: 0.4; transform: scale(0.85); }
     }
-    header h1 { font-size: 15px; font-weight: 600; letter-spacing: -0.2px; color: var(--text-1); }
-    .header-right { display: flex; align-items: center; gap: 12px; }
+    .brand-title {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -0.2px;
+      color: var(--text-main);
+    }
+    .brand-tag {
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: var(--bg-subtle);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
 
-    /* Status badges */
-    .badge {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 4px 10px;
-      border-radius: 20px;
-      font-size: 12px;
+    .header-diagnostics {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .diag-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 11px;
       font-weight: 500;
-      border: 1px solid transparent;
+      font-family: 'JetBrains Mono', monospace;
+      border: 1px solid var(--border);
+      background: var(--bg-subtle);
+      color: var(--text-muted);
     }
-    .badge-dot { width: 7px; height: 7px; border-radius: 50%; }
-    .badge-connected    { background: #052e16; border-color: #15803d; color: var(--green); }
-    .badge-disconnected { background: #1c0a0a; border-color: #7f1d1d; color: var(--red); }
-    .badge-mock         { background: #1a1506; border-color: #854d0e; color: var(--yellow); }
-    .dot-green  { background: var(--green); }
-    .dot-red    { background: var(--red); }
-    .dot-yellow { background: var(--yellow); }
+    .diag-pill .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+    .diag-pill.ok {
+      border-color: rgba(34, 197, 94, 0.4);
+      background: rgba(34, 197, 94, 0.08);
+      color: var(--status-ok);
+    }
+    .diag-pill.ok .dot { background: var(--status-ok); }
 
-    /* ---- MAIN LAYOUT ---- */
+    .diag-pill.warn {
+      border-color: rgba(245, 158, 11, 0.4);
+      background: rgba(245, 158, 11, 0.08);
+      color: var(--status-warn);
+    }
+    .diag-pill.warn .dot { background: var(--status-warn); }
+
+    .diag-pill.err {
+      border-color: rgba(239, 68, 68, 0.4);
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--status-err);
+    }
+    .diag-pill.err .dot { background: var(--status-err); }
+
+    /* ---- MAIN CONTENT ---- */
     main {
       flex: 1;
       display: grid;
-      grid-template-columns: 1fr 340px;
-      grid-template-rows: 1fr;
-      gap: 0;
+      grid-template-columns: 1fr 360px;
       overflow: hidden;
-    }
-
-    /* ---- ECG PANEL ---- */
-    .ecg-panel {
-      display: flex;
-      flex-direction: column;
-      padding: 24px;
-      gap: 16px;
-      border-right: 1px solid var(--border);
       min-height: 0;
     }
-    .ecg-header {
+
+    /* ---- LEFT: ECG WAVEFORM VIEWPORT ---- */
+    .viewport-panel {
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--border);
+      min-height: 0;
+      background: var(--bg-base);
+    }
+
+    /* 10-Second Warmup / Recording Banner */
+    .recording-banner {
+      padding: 10px 20px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .recording-meta {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      font-size: 12px;
     }
-    .ecg-title { font-size: 13px; font-weight: 500; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.6px; }
-    .ecg-meta {
+    .rec-status-title {
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .rec-status-detail {
       font-family: 'JetBrains Mono', monospace;
       font-size: 11px;
-      color: var(--text-3);
+      color: var(--text-dim);
     }
-    .chart-wrap {
+    .progress-bar-bg {
+      height: 5px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+      position: relative;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--accent-blue);
+      border-radius: 3px;
+      transition: width 0.2s linear;
+      width: 0%;
+    }
+
+    /* Chart Container */
+    .chart-container {
       flex: 1;
       position: relative;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
+      padding: 16px 20px 8px 20px;
       min-height: 0;
     }
-    #ecgChart { width: 100% !important; height: 100% !important; display: block; }
+    #ecgChart {
+      width: 100% !important;
+      height: 100% !important;
+      display: block;
+    }
 
-    /* Lead-off overlay */
+    /* Overlay: Lead-Off Warning */
     .lead-off-overlay {
-      position: absolute; inset: 0;
-      background: rgba(11,13,18,0.85);
+      position: absolute;
+      inset: 16px 20px 8px 20px;
+      background: rgba(12, 14, 20, 0.88);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      border-radius: 6px;
       display: none;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      flex-direction: column;
-      gap: 12px;
-      z-index: 10;
+      gap: 10px;
+      z-index: 20;
     }
-    .lead-off-overlay.active { display: flex; }
-    .lead-off-icon { font-size: 40px; opacity: 0.6; }
-    .lead-off-text { color: var(--text-2); font-size: 14px; font-weight: 500; }
+    .lead-off-overlay.active {
+      display: flex;
+    }
+    .lead-off-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--status-err);
+    }
+    .lead-off-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      max-width: 440px;
+      text-align: center;
+      line-height: 1.4;
+    }
 
-    /* ---- PREDICTION PANEL ---- */
-    .pred-panel {
+    /* Waveform Telemetry Footer */
+    .waveform-metrics {
+      padding: 10px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-surface);
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+    }
+    .metric-card {
       display: flex;
       flex-direction: column;
-      padding: 24px;
+    }
+    .metric-label {
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .metric-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-main);
+      margin-top: 1px;
+    }
+
+    /* ---- RIGHT: INFERENCE & DIAGNOSIS PANEL ---- */
+    .sidebar-panel {
+      background: var(--bg-surface);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
       gap: 20px;
       overflow-y: auto;
     }
-    .section-label {
+
+    .panel-section-title {
       font-size: 11px;
       font-weight: 600;
-      color: var(--text-3);
+      color: var(--text-dim);
       text-transform: uppercase;
-      letter-spacing: 1px;
+      letter-spacing: 0.8px;
     }
 
-    /* Current prediction card */
-    .pred-card {
-      background: var(--surface);
+    /* Prediction Card */
+    .prediction-card {
+      background: var(--bg-subtle);
       border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 20px;
+      border-radius: 8px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
     }
-    .pred-status-row {
+    .pred-header {
       display: flex;
       align-items: center;
-      gap: 10px;
-      margin-bottom: 14px;
+      justify-content: space-between;
     }
-    .pred-indicator {
-      width: 12px; height: 12px;
-      border-radius: 50%;
-      flex-shrink: 0;
-      transition: background 0.4s;
+    .pred-cadence {
+      font-size: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-dim);
     }
-    .pred-name {
-      font-size: 18px;
+    .pred-main-label {
+      font-size: 17px;
       font-weight: 700;
       letter-spacing: -0.3px;
-      line-height: 1.2;
-      flex: 1;
-      transition: color 0.4s;
+      color: var(--text-main);
     }
-    .confidence-row {
+    .pred-confidence-row {
       display: flex;
-      align-items: center;
       justify-content: space-between;
-      margin-bottom: 8px;
+      align-items: center;
+      font-size: 12px;
     }
-    .confidence-label { font-size: 11px; color: var(--text-2); font-weight: 500; }
-    .confidence-pct {
+    .pred-conf-value {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 13px;
       font-weight: 600;
-      color: var(--text-1);
-    }
-    .conf-bar-bg {
-      height: 6px; border-radius: 3px;
-      background: var(--border);
-      overflow: hidden;
-    }
-    .conf-bar-fill {
-      height: 100%;
-      border-radius: 3px;
-      transition: width 0.5s ease, background 0.4s;
-      background: var(--teal);
-    }
-    .pred-waiting {
-      color: var(--text-3);
-      font-size: 13px;
-      text-align: center;
-      padding: 12px 0;
+      color: var(--text-main);
     }
 
-    /* Class breakdown */
-    .breakdown-list { display: flex; flex-direction: column; gap: 10px; }
-    .class-row { display: flex; flex-direction: column; gap: 4px; }
-    .class-row-top {
+    .pred-bar-bg {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .pred-bar-fill {
+      height: 100%;
+      background: var(--ecg-line);
+      border-radius: 3px;
+      transition: width 0.4s ease;
+      width: 0%;
+    }
+
+    /* Class Breakdown */
+    .breakdown-box {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .class-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .class-item-top {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      font-size: 12px;
     }
-    .class-dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      display: inline-block;
-      margin-right: 6px;
-      flex-shrink: 0;
+    .class-name-lbl {
+      color: var(--text-muted);
+      font-weight: 500;
     }
-    .class-name-text { font-size: 12px; color: var(--text-2); }
-    .class-prob {
+    .class-pct-lbl {
       font-family: 'JetBrains Mono', monospace;
       font-size: 11px;
-      color: var(--text-3);
+      color: var(--text-dim);
     }
-    .class-bar-bg {
-      height: 4px; border-radius: 2px;
+    .class-bar-track {
+      height: 4px;
       background: var(--border);
+      border-radius: 2px;
       overflow: hidden;
     }
     .class-bar-fill {
       height: 100%;
+      background: var(--accent-blue);
       border-radius: 2px;
-      transition: width 0.5s ease;
+      transition: width 0.3s ease;
+      width: 0%;
     }
 
-    /* Divider */
-    hr { border: none; border-top: 1px solid var(--border); }
-
-    /* Stats row */
-    .stats-row { display: flex; flex-direction: column; gap: 10px; }
-    .stat { display: flex; justify-content: space-between; align-items: center; }
-    .stat-label { font-size: 12px; color: var(--text-2); }
-    .stat-value {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
-      color: var(--text-1);
-      font-weight: 500;
+    /* Diagnostics summary table */
+    .diag-table {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
-
-    /* Footer */
-    footer {
-      background: var(--surface);
-      border-top: 1px solid var(--border);
-      padding: 8px 24px;
-      font-size: 11px;
-      color: var(--text-3);
+    .diag-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      font-size: 12px;
+    }
+    .diag-label {
+      color: var(--text-dim);
+    }
+    .diag-val {
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-main);
+      font-weight: 500;
+    }
+
+    /* ---- FOOTER ---- */
+    footer {
+      background: var(--bg-surface);
+      border-top: 1px solid var(--border);
+      height: 32px;
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-dim);
       flex-shrink: 0;
     }
   </style>
 </head>
 <body>
 
-<!-- ====== HEADER ====== -->
-<header>
-  <div class="header-left">
-    <div class="logo-dot"></div>
-    <h1>ECG Arrhythmia Monitor</h1>
-  </div>
-  <div class="header-right">
-    <div id="leadOffBadge" class="badge badge-connected">
-      <span class="badge-dot dot-green"></span>
-      Leads OK
+  <!-- ====== HEADER ====== -->
+  <header>
+    <div class="header-brand">
+      <div class="brand-pulse"></div>
+      <h1 class="brand-title">ECG Arrhythmia Monitor</h1>
+      <span class="brand-tag">Single-Lead II · 250 Hz</span>
     </div>
-    <div id="connBadge" class="badge badge-disconnected">
-      <span class="badge-dot dot-red"></span>
-      Connecting…
-    </div>
-  </div>
-</header>
 
-<!-- ====== MAIN ====== -->
-<main>
-  <!-- ECG waveform panel -->
-  <section class="ecg-panel">
-    <div class="ecg-header">
-      <span class="ecg-title">Live ECG — Lead II &nbsp;·&nbsp; 250 Hz</span>
-      <span class="ecg-meta" id="sampleCount">Samples: 0</span>
-    </div>
-    <div class="chart-wrap">
-      <canvas id="ecgChart"></canvas>
-      <div class="lead-off-overlay" id="leadOffOverlay">
-        <div class="lead-off-icon">⚡</div>
-        <div class="lead-off-text">Lead-Off Detected — Check Electrodes</div>
+    <div class="header-diagnostics">
+      <!-- Hardware Serial Connection -->
+      <div id="hwBadge" class="diag-pill warn">
+        <span class="dot"></span>
+        <span id="hwStatusText">Connecting…</span>
+      </div>
+
+      <!-- Lead-Off Detection -->
+      <div id="leadsBadge" class="diag-pill ok">
+        <span class="dot"></span>
+        <span id="leadsStatusText">Leads Connected</span>
+      </div>
+
+      <!-- Sampling Rate -->
+      <div id="rateBadge" class="diag-pill">
+        <span id="rateStatusText">0.0 Hz</span>
+      </div>
+
+      <!-- AI Engine -->
+      <div id="modelBadge" class="diag-pill ok">
+        <span class="dot"></span>
+        <span id="modelStatusText">CNN-BiLSTM Ready</span>
       </div>
     </div>
-  </section>
+  </header>
 
-  <!-- Prediction panel -->
-  <aside class="pred-panel">
-    <span class="section-label">Current Prediction</span>
-
-    <!-- Main prediction card -->
-    <div class="pred-card" id="predCard">
-      <div id="predWaiting" class="pred-waiting">Waiting for first window…<br/>(10 sec warm-up)</div>
-      <div id="predResult" style="display:none;">
-        <div class="pred-status-row">
-          <div class="pred-indicator" id="predDot"></div>
-          <div class="pred-name" id="predName">—</div>
+  <!-- ====== MAIN CONTENT ====== -->
+  <main>
+    <!-- Left: Waveform Viewport -->
+    <section class="viewport-panel">
+      <!-- 10-Second Recording / Calibration Indicator -->
+      <div class="recording-banner" id="recBanner">
+        <div class="recording-meta">
+          <span class="rec-status-title" id="recStatusTitle">
+            <span style="color:var(--accent-blue)">●</span> Initialising 10-Second Baseline…
+          </span>
+          <span class="rec-status-detail" id="recStatusDetail">0.0s / 10.0s (0%)</span>
         </div>
-        <div class="confidence-row">
-          <span class="confidence-label">Confidence</span>
-          <span class="confidence-pct" id="confPct">0%</span>
-        </div>
-        <div class="conf-bar-bg">
-          <div class="conf-bar-fill" id="confBar" style="width:0%"></div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="recProgressBar"></div>
         </div>
       </div>
-    </div>
 
-    <hr />
-    <span class="section-label">Class Probabilities</span>
+      <!-- Live ECG Canvas -->
+      <div class="chart-container">
+        <canvas id="ecgChart"></canvas>
 
-    <!-- Per-class probability bars -->
-    <div class="breakdown-list" id="breakdownList">
-      <!-- Populated by JS -->
-    </div>
-
-    <hr />
-    <span class="section-label">Session Info</span>
-    <div class="stats-row">
-      <div class="stat">
-        <span class="stat-label">Mode</span>
-        <span class="stat-value" id="statMode">—</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Predictions</span>
-        <span class="stat-value" id="statPredCount">0</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Uptime</span>
-        <span class="stat-value" id="statUptime">0s</span>
-      </div>
-    </div>
-  </aside>
-</main>
-
-<!-- ====== FOOTER ====== -->
-<footer>
-  <span>Educational / Research prototype — not for clinical use</span>
-  <span id="footerTime"></span>
-</footer>
-
-<script>
-// ---- Constants ----
-const MAX_POINTS   = 2500;   // 10 sec @ 250 Hz visible on chart
-const CLASS_COLORS = ["#22c55e", "#f97316", "#eab308", "#ef4444", "#6b7280"];
-const CLASS_NAMES  = [
-  "Normal Sinus Rhythm",
-  "Atrial Fibrillation",
-  "Supraventricular Arrhythmia",
-  "Ventricular Arrhythmia",
-  "Noise / Artifact",
-];
-
-// ---- State ----
-let ecgBuffer   = new Array(MAX_POINTS).fill(0);
-let totalSamples = 0;
-let predCount    = 0;
-let startTime    = Date.now();
-let mode         = "—";
-
-// ---- Build class breakdown list ----
-(function buildBreakdown() {
-  const list = document.getElementById("breakdownList");
-  CLASS_NAMES.forEach((name, i) => {
-    list.innerHTML += `
-      <div class="class-row" id="cr-${i}">
-        <div class="class-row-top">
-          <span><span class="class-dot" style="background:${CLASS_COLORS[i]}"></span>
-                <span class="class-name-text">${name}</span></span>
-          <span class="class-prob" id="prob-${i}">—</span>
+        <!-- Lead-Off Overlay Alert -->
+        <div class="lead-off-overlay" id="leadOffOverlay">
+          <div class="lead-off-title">⚠️ Electrodes Disconnected (Lead-Off)</div>
+          <div class="lead-off-desc">
+            The AD8232 sensor signals open-circuit contact. Please ensure the 3 electrode pads (Right Arm, Left Arm, Right Leg ground) are firmly attached with conductive gel to skin.
+          </div>
         </div>
-        <div class="class-bar-bg">
-          <div class="class-bar-fill" id="bar-${i}" style="width:0%;background:${CLASS_COLORS[i]}"></div>
-        </div>
-      </div>`;
-  });
-})();
+      </div>
 
-// ---- Chart.js setup ----
-const ctx   = document.getElementById("ecgChart").getContext("2d");
-const chart = new Chart(ctx, {
-  type: "line",
-  data: {
-    labels: Array.from({length: MAX_POINTS}, (_, i) => i),
-    datasets: [{
-      data:           ecgBuffer,
-      borderColor:    "#14b8a6",
-      borderWidth:    1.5,
-      pointRadius:    0,
-      tension:        0,
-      fill:           false,
-    }]
-  },
-  options: {
-    animation:   false,
-    responsive:  true,
-    maintainAspectRatio: false,
-    plugins: { legend: { display: false }, tooltip: { enabled: false } },
-    scales: {
-      x: {
-        display: false,
-        ticks: { display: false },
+      <!-- Telemetry Strip Below Waveform -->
+      <div class="waveform-metrics">
+        <div class="metric-card">
+          <span class="metric-label">Current ADC</span>
+          <span class="metric-value" id="valCurrent">—</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Peak-to-Peak (Vpp)</span>
+          <span class="metric-value" id="valVpp">—</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Signal Baseline</span>
+          <span class="metric-value" id="valBaseline">—</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Estimated HR</span>
+          <span class="metric-value" id="valHR">— BPM</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Window Buffer</span>
+          <span class="metric-value" id="valWindow">0 / 2500</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right: Arrhythmia Diagnosis Panel -->
+    <aside class="sidebar-panel">
+      <span class="panel-section-title">Diagnostic Inference</span>
+
+      <!-- Primary Prediction Card -->
+      <div class="prediction-card">
+        <div class="pred-header">
+          <span class="panel-section-title">Current Rhythm</span>
+          <span class="pred-cadence">Window: 10s · Stride: 2s</span>
+        </div>
+        <div class="pred-main-label" id="predLabel">Awaiting 10s buffer…</div>
+
+        <div class="pred-confidence-row">
+          <span style="color:var(--text-muted)">Model Confidence</span>
+          <span class="pred-conf-value" id="predConfPct">—</span>
+        </div>
+        <div class="pred-bar-bg">
+          <div class="pred-bar-fill" id="predConfBar"></div>
+        </div>
+      </div>
+
+      <span class="panel-section-title">Class Distribution</span>
+      <div class="breakdown-box" id="breakdownContainer">
+        <!-- Rendered by JS -->
+      </div>
+
+      <hr style="border:none; border-top:1px solid var(--border);" />
+
+      <span class="panel-section-title">System Health Diagnostics</span>
+      <div class="diag-table">
+        <div class="diag-row">
+          <span class="diag-label">Serial Source</span>
+          <span class="diag-val" id="diagPort">—</span>
+        </div>
+        <div class="diag-row">
+          <span class="diag-label">Data Transmission</span>
+          <span class="diag-val" id="diagDataState">Waiting for stream</span>
+        </div>
+        <div class="diag-row">
+          <span class="diag-label">Total Samples</span>
+          <span class="diag-val" id="diagSamples">0</span>
+        </div>
+        <div class="diag-row">
+          <span class="diag-label">Inference Model</span>
+          <span class="diag-val" id="diagModelName">best_ecg_cnn_bilstm.pt</span>
+        </div>
+        <div class="diag-row">
+          <span class="diag-label">Server Uptime</span>
+          <span class="diag-val" id="diagUptime">0s</span>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ====== FOOTER ====== -->
+  <footer>
+    <span>AI Arrhythmia Detection System · Lead II AD8232 Hardware Pipeline</span>
+    <span id="footerClock">--:--:--</span>
+  </footer>
+
+  <script>
+    // ------------------------------------------------------------- Constants & Configuration
+    const WINDOW_POINTS = 2500;   // 10 sec @ 250 Hz
+    const CLASS_NAMES = [
+      "Normal Sinus Rhythm",
+      "Atrial Fibrillation",
+      "Supraventricular Arrhythmia",
+      "Ventricular Arrhythmia",
+      "Noise / Artifact"
+    ];
+    const CLASS_COLORS = [
+      "#22c55e",  // Normal: green
+      "#f97316",  // AFib: orange
+      "#eab308",  // SV: yellow
+      "#ef4444",  // Ventricular: red
+      "#64748b"   // Noise: slate
+    ];
+
+    // ------------------------------------------------------------- State Management
+    let ecgBuffer = new Array(WINDOW_POINTS).fill(2048.0);
+    let totalSamples = 0;
+    let initialSeed = false;
+    let startTime = Date.now();
+    let lastSampleTime = Date.now();
+    let currentVpp = 0;
+    let currentBaseline = 2048;
+
+    // ------------------------------------------------------------- UI Setup: Breakdown List
+    const breakdownContainer = document.getElementById("breakdownContainer");
+    CLASS_NAMES.forEach((name, i) => {
+      const item = document.createElement("div");
+      item.className = "class-item";
+      item.innerHTML = `
+        <div class="class-item-top">
+          <span class="class-name-lbl">${name}</span>
+          <span class="class-pct-lbl" id="prob-val-${i}">0.0%</span>
+        </div>
+        <div class="class-bar-track">
+          <div class="class-bar-fill" id="prob-bar-${i}" style="background:${CLASS_COLORS[i]};"></div>
+        </div>
+      `;
+      breakdownContainer.appendChild(item);
+    });
+
+    // ------------------------------------------------------------- Chart.js Initialization
+    const ctx = document.getElementById("ecgChart").getContext("2d");
+    const chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: Array.from({ length: WINDOW_POINTS }, (_, i) => i),
+        datasets: [{
+          data: ecgBuffer,
+          borderColor: "#10b981",
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0,
+          fill: false,
+        }]
       },
-      y: {
-        display: true,
-        grid: { color: "rgba(255,255,255,0.04)" },
-        ticks: {
-          color: "#4a4f65",
-          font: { family: "'JetBrains Mono', monospace", size: 10 },
-          maxTicksLimit: 5,
+      options: {
+        animation: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { enabled: false }
         },
-        border: { color: "#1f2330" },
+        scales: {
+          x: { display: false },
+          y: {
+            display: true,
+            grid: { color: "rgba(255, 255, 255, 0.04)" },
+            ticks: {
+              color: "#64748b",
+              font: { family: "'JetBrains Mono', monospace", size: 10 },
+              maxTicksLimit: 6,
+            },
+            border: { color: "#242b3d" }
+          }
+        }
+      }
+    });
+
+    // ------------------------------------------------------------- Chart Y-Axis Auto-Zoom
+    let lastAxisUpdate = 0;
+    function updateYAxisScaling(samples) {
+      const now = performance.now();
+      if (now - lastAxisUpdate < 200) return; // limit scale calculations to 5 FPS
+      lastAxisUpdate = now;
+
+      let min = Infinity;
+      let max = -Infinity;
+      let sum = 0;
+      const len = ecgBuffer.length;
+      for (let i = 0; i < len; i += 2) { // stride 2 for performance
+        const v = ecgBuffer[i];
+        if (v < min) min = v;
+        if (v > max) max = v;
+        sum += v;
+      }
+      currentBaseline = Math.round(sum / (len / 2));
+      currentVpp = Math.round(max - min);
+
+      document.getElementById("valVpp").textContent = `${currentVpp} ADC`;
+      document.getElementById("valBaseline").textContent = `${currentBaseline} ADC`;
+
+      // Provide responsive padding around dynamic range
+      const margin = Math.max(100, Math.round(currentVpp * 0.2));
+      chart.options.scales.y.min = Math.floor(min - margin);
+      chart.options.scales.y.max = Math.ceil(max + margin);
+    }
+
+    // ------------------------------------------------------------- Sample Ingestion
+    function pushEcgSamples(samples) {
+      if (!samples || !samples.length) return;
+
+      if (!initialSeed) {
+        // Initialize entire buffer to current baseline to eliminate step discontinuity
+        ecgBuffer.fill(samples[0]);
+        initialSeed = true;
+      }
+
+      ecgBuffer.splice(0, samples.length);
+      ecgBuffer.push(...samples);
+      totalSamples += samples.length;
+      lastSampleTime = Date.now();
+
+      const lastVal = Math.round(samples[samples.length - 1]);
+      document.getElementById("valCurrent").textContent = `${lastVal}`;
+      document.getElementById("valWindow").textContent = `${Math.min(WINDOW_POINTS, totalSamples)} / ${WINDOW_POINTS}`;
+
+      updateYAxisScaling(samples);
+      chart.data.datasets[0].data = ecgBuffer;
+      chart.update("none");
+    }
+
+    // ------------------------------------------------------------- UI Updates
+    function updateInferenceUI(prediction) {
+      if (!prediction) return;
+
+      const predLabel = document.getElementById("predLabel");
+      const confPct = document.getElementById("predConfPct");
+      const confBar = document.getElementById("predConfBar");
+
+      const color = CLASS_COLORS[prediction.class_id] || "#10b981";
+      const pct = (prediction.confidence * 100).toFixed(1) + "%";
+
+      predLabel.textContent = prediction.class_name;
+      predLabel.style.color = color;
+      confPct.textContent = pct;
+      confBar.style.width = pct;
+      confBar.style.background = color;
+
+      if (prediction.probabilities) {
+        prediction.probabilities.forEach((prob, i) => {
+          const strPct = (prob * 100).toFixed(1) + "%";
+          const elVal = document.getElementById(`prob-val-${i}`);
+          const elBar = document.getElementById(`prob-bar-${i}`);
+          if (elVal) elVal.textContent = strPct;
+          if (elBar) elBar.style.width = strPct;
+        });
       }
     }
-  }
-});
 
-// ---- Prediction UI update ----
-function updatePrediction(p) {
-  if (!p) return;
-  predCount++;
-  document.getElementById("statPredCount").textContent = predCount;
+    function updateSystemStatus(s, leadOff) {
+      // 1. Hardware connection pill
+      const hwBadge = document.getElementById("hwBadge");
+      const hwText  = document.getElementById("hwStatusText");
+      if (s.mode === "mock") {
+        hwBadge.className = "diag-pill warn";
+        hwText.textContent = "Mock Mode (No HW)";
+      } else if (s.hardware_connected) {
+        hwBadge.className = "diag-pill ok";
+        hwText.textContent = `${s.port || 'Serial'} Connected (${s.baud || 115200})`;
+      } else {
+        hwBadge.className = "diag-pill err";
+        hwText.textContent = `${s.port || 'COM'} Disconnected`;
+      }
 
-  const color = CLASS_COLORS[p.class_id];
-  const pct   = (p.confidence * 100).toFixed(1);
+      // 2. Lead-off alert
+      const leadsBadge = document.getElementById("leadsBadge");
+      const leadsText  = document.getElementById("leadsStatusText");
+      const leadOverlay = document.getElementById("leadOffOverlay");
 
-  document.getElementById("predWaiting").style.display = "none";
-  document.getElementById("predResult").style.display  = "block";
-  document.getElementById("predDot").style.background   = color;
-  document.getElementById("predName").textContent        = p.class_name;
-  document.getElementById("predName").style.color        = color;
-  document.getElementById("confPct").textContent         = pct + "%";
-  document.getElementById("confBar").style.width         = pct + "%";
-  document.getElementById("confBar").style.background    = color;
+      if (leadOff) {
+        leadsBadge.className = "diag-pill err";
+        leadsText.textContent = "⚠️ Lead-Off!";
+        leadOverlay.classList.add("active");
+      } else {
+        leadsBadge.className = "diag-pill ok";
+        leadsText.textContent = "Leads Connected";
+        leadOverlay.classList.remove("active");
+      }
 
-  // Per-class bars
-  p.probabilities.forEach((prob, i) => {
-    const pctStr = (prob * 100).toFixed(1) + "%";
-    document.getElementById(`prob-${i}`).textContent        = pctStr;
-    document.getElementById(`bar-${i}`).style.width          = pctStr;
-  });
-}
+      // 3. Rate display
+      const rateText = document.getElementById("rateStatusText");
+      const rateVal  = s.sample_rate || 0.0;
+      rateText.textContent = `${rateVal.toFixed(1)} Hz`;
 
-// ---- Lead-off UI update ----
-function updateLeadOff(lo) {
-  const overlay = document.getElementById("leadOffOverlay");
-  const badge   = document.getElementById("leadOffBadge");
-  if (lo) {
-    overlay.classList.add("active");
-    badge.className = "badge badge-disconnected";
-    badge.innerHTML = '<span class="badge-dot dot-red"></span>Lead-Off';
-  } else {
-    overlay.classList.remove("active");
-    badge.className = "badge badge-connected";
-    badge.innerHTML = '<span class="badge-dot dot-green"></span>Leads OK';
-  }
-}
+      // 4. Warm-up progress (10 seconds)
+      const recTitle = document.getElementById("recStatusTitle");
+      const recDetail = document.getElementById("recStatusDetail");
+      const recBar = document.getElementById("recProgressBar");
 
-// ---- ECG buffer update + chart redraw ----
-function pushSamples(samples) {
-  ecgBuffer.splice(0, samples.length);
-  ecgBuffer.push(...samples);
-  totalSamples += samples.length;
-  chart.data.datasets[0].data = ecgBuffer;
-  chart.update("none");   // "none" = skip animation for performance
-  document.getElementById("sampleCount").textContent = `Samples: ${totalSamples.toLocaleString()}`;
-}
+      if (!s.is_ready) {
+        const sec = (s.progress_sec || 0).toFixed(1);
+        const pct = (s.progress_pct || 0).toFixed(0);
+        recTitle.innerHTML = `<span style="color:var(--accent-blue)">●</span> Recording 10-Second Baseline…`;
+        recDetail.textContent = `${sec}s / 10.0s (${pct}%)`;
+        recBar.style.width = `${pct}%`;
+        recBar.style.background = "var(--accent-blue)";
+      } else {
+        recTitle.innerHTML = `<span style="color:var(--status-ok)">✔</span> 10s Window Captured — Continuous Live Inference`;
+        recDetail.textContent = `2500 Samples Ready · Updating Every 2s`;
+        recBar.style.width = "100%";
+        recBar.style.background = "var(--status-ok)";
+      }
 
-// ---- Uptime ticker ----
-setInterval(() => {
-  const s = Math.floor((Date.now() - startTime) / 1000);
-  const m = Math.floor(s / 60);
-  document.getElementById("statUptime").textContent = m > 0 ? `${m}m ${s % 60}s` : `${s}s`;
-  const now = new Date();
-  document.getElementById("footerTime").textContent = now.toLocaleTimeString();
-}, 1000);
+      // 5. Sidebar Diagnostics
+      document.getElementById("diagPort").textContent = s.mode === "mock" ? "Mock Generator" : (s.port || "COM5");
+      document.getElementById("diagSamples").textContent = (s.samples_received || totalSamples).toLocaleString();
 
-// ---- WebSocket connection ----
-(function connect() {
-  const wsUrl  = `ws://${location.host}/ws/ecg`;
-  const badge  = document.getElementById("connBadge");
-  const socket = new WebSocket(wsUrl);
+      const timeSinceSample = (Date.now() - lastSampleTime) / 1000;
+      const dataState = document.getElementById("diagDataState");
+      if (s.hardware_connected && rateVal > 50) {
+        dataState.textContent = "Active (Streaming)";
+        dataState.style.color = "var(--status-ok)";
+      } else if (s.mode === "mock") {
+        dataState.textContent = "Active (Mock 250Hz)";
+        dataState.style.color = "var(--status-warn)";
+      } else {
+        dataState.textContent = "No Incoming Bytes";
+        dataState.style.color = "var(--status-err)";
+      }
+    }
 
-  socket.onopen = () => {
-    badge.className = "badge badge-connected";
-    badge.innerHTML = '<span class="badge-dot dot-green"></span>Connected';
-    console.log("WebSocket connected:", wsUrl);
-  };
+    // ------------------------------------------------------------- Heart Rate Estimator
+    let lastPeakTime = 0;
+    let rrIntervals = [];
+    function estimateHeartRate(samples) {
+      if (!samples || samples.length < 5) return;
+      // Simple peak detection above baseline + 0.5 * Vpp
+      if (currentVpp < 60) return; // insufficient amplitude
+      const threshold = currentBaseline + (currentVpp * 0.35);
+      const now = Date.now();
 
-  socket.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.ecg && msg.ecg.length)      pushSamples(msg.ecg);
-    if (msg.lead_off !== undefined)     updateLeadOff(msg.lead_off);
-    if (msg.prediction)                 updatePrediction(msg.prediction);
-  };
+      for (let i = 0; i < samples.length; i++) {
+        if (samples[i] > threshold && (now - lastPeakTime > 400)) { // refractory period 400ms (max 150 bpm)
+          if (lastPeakTime > 0) {
+            const rr = (now - lastPeakTime) / 1000.0;
+            if (rr >= 0.35 && rr <= 1.8) {
+              rrIntervals.push(rr);
+              if (rrIntervals.length > 5) rrIntervals.shift();
+              const avgRR = rrIntervals.reduce((a, b) => a + b, 0) / rrIntervals.length;
+              const bpm = Math.round(60.0 / avgRR);
+              document.getElementById("valHR").textContent = `${bpm} BPM`;
+            }
+          }
+          lastPeakTime = now;
+          break;
+        }
+      }
+    }
 
-  socket.onerror = (e) => {
-    badge.className = "badge badge-disconnected";
-    badge.innerHTML = '<span class="badge-dot dot-red"></span>Error';
-    console.error("WebSocket error", e);
-  };
+    // ------------------------------------------------------------- WebSocket Client
+    (function connectWebSocket() {
+      const wsUrl = `ws://${location.host}/ws/ecg`;
+      const socket = new WebSocket(wsUrl);
 
-  socket.onclose = () => {
-    badge.className = "badge badge-mock";
-    badge.innerHTML = '<span class="badge-dot dot-yellow"></span>Reconnecting…';
-    console.warn("WebSocket closed. Reconnecting in 3s…");
-    setTimeout(connect, 3000);   // auto-reconnect
-  };
-})();
+      socket.onopen = () => {
+        console.log("WebSocket connected to:", wsUrl);
+      };
 
-// ---- Fetch status for mode indicator ----
-fetch("/status")
-  .then(r => r.json())
-  .then(d => {
-    mode = d.mode === "mock" ? "Mock (No HW)" : `Serial (${d.port})`;
-    document.getElementById("statMode").textContent = mode;
-  })
-  .catch(() => {});
-</script>
+      socket.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.ecg && msg.ecg.length > 0) {
+            pushEcgSamples(msg.ecg);
+            estimateHeartRate(msg.ecg);
+          }
+          if (msg.prediction) {
+            updateInferenceUI(msg.prediction);
+          }
+          if (msg.system_status) {
+            updateSystemStatus(msg.system_status, msg.lead_off);
+          }
+        } catch (err) {
+          console.error("Error processing WebSocket payload:", err);
+        }
+      };
+
+      socket.onerror = (e) => {
+        console.warn("WebSocket error:", e);
+      };
+
+      socket.onclose = () => {
+        console.warn("WebSocket disconnected. Retrying in 2 seconds…");
+        setTimeout(connectWebSocket, 2000);
+      };
+    })();
+
+    // ------------------------------------------------------------- Periodic Clocks
+    setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const m = Math.floor(elapsed / 60);
+      const s = elapsed % 60;
+      document.getElementById("diagUptime").textContent = m > 0 ? `${m}m ${s}s` : `${s}s`;
+      document.getElementById("footerClock").textContent = new Date().toLocaleTimeString();
+    }, 1000);
+  </script>
 </body>
 </html>

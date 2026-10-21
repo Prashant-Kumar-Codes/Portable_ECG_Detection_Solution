@@ -78,13 +78,20 @@ class SerialReader:
         self._running  = False
         self._thread: Optional[threading.Thread] = None
         self._samples_received = 0       # total samples received (for ready check)
+        self._hardware_connected = False
+        self._initial_fill_done = False
+
+        # Live sample rate tracking
+        self._rate_count = 0
+        self._rate_last_t = time.time()
+        self._sample_rate = 0.0
 
         self.port = port
         self.baud = baud
         self._mock = (port is None)
 
-        # Pre-fill with zeros so get_window() always returns WINDOW_SAMPLES values
-        self._buffer.extend([0.0] * WINDOW_SAMPLES)
+        # Pre-fill buffer with 2048.0 (ADC midpoint) instead of 0 to avoid huge step jumps
+        self._buffer.extend([2048.0] * WINDOW_SAMPLES)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -102,12 +109,13 @@ class SerialReader:
     def stop(self):
         """Signal the acquisition thread to stop and wait for it."""
         self._running = False
+        self._hardware_connected = False
         if self._thread:
             self._thread.join(timeout=2.0)
         logger.info("SerialReader stopped.")
 
     # ------------------------------------------------------------------
-    # Public data accessors
+    # Public data accessors & properties
     # ------------------------------------------------------------------
 
     def get_window(self) -> np.ndarray:
@@ -137,40 +145,74 @@ class SerialReader:
         """True once at least WINDOW_SAMPLES real samples have been received."""
         return self._samples_received >= WINDOW_SAMPLES
 
+    @property
+    def samples_received(self) -> int:
+        """Total valid samples received since start."""
+        return self._samples_received
+
+    @property
+    def sample_rate(self) -> float:
+        """Estimated real-time sampling rate in Hz."""
+        return self._sample_rate
+
+    @property
+    def hardware_connected(self) -> bool:
+        """True when serial port is open and actively receiving."""
+        return self._hardware_connected
+
     # ------------------------------------------------------------------
     # Internal — push
     # ------------------------------------------------------------------
 
     def _push(self, value: float, lead_off: bool = False):
         with self._lock:
+            # On first real sample, seed the buffer with that value to prevent baseline jump
+            if not self._initial_fill_done:
+                self._buffer.clear()
+                self._buffer.extend([value] * WINDOW_SAMPLES)
+                self._initial_fill_done = True
+
             self._buffer.append(value)
             self._new_samples.append(value)
             self._lead_off = lead_off
             self._samples_received += 1
+
+            # Update sample rate estimate every ~1 second
+            self._rate_count += 1
+            now = time.time()
+            dt = now - self._rate_last_t
+            if dt >= 1.0:
+                self._sample_rate = self._rate_count / dt
+                self._rate_count = 0
+                self._rate_last_t = now
 
     # ------------------------------------------------------------------
     # Acquisition loops (run in daemon thread)
     # ------------------------------------------------------------------
 
     def _serial_loop(self):
-        """Read newline-delimited frames from the ESP32 over PySerial."""
+        """Read newline-delimited frames from the ESP32/Arduino over PySerial."""
         try:
             import serial
         except ImportError:
             logger.error("pyserial not installed. Install with: pip install pyserial")
             self._mock = True
+            self._hardware_connected = False
             self._mock_loop()
             return
 
         try:
-            ser = serial.Serial(self.port, self.baud, timeout=1)
-            logger.info(f"Serial port {self.port} opened.")
+            ser = serial.Serial(self.port, self.baud, timeout=1.0)
+            self._hardware_connected = True
+            logger.info(f"Serial port {self.port} opened successfully at {self.baud} baud.")
         except Exception as exc:
-            logger.error(f"Cannot open {self.port}: {exc}. Switching to mock mode.")
+            logger.error(f"Cannot open serial port {self.port}: {exc}. Switching to mock mode.")
             self._mock = True
+            self._hardware_connected = False
             self._mock_loop()
             return
 
+        error_streak = 0
         while self._running:
             try:
                 raw = ser.readline()
@@ -179,17 +221,35 @@ class SerialReader:
                 line = raw.decode("utf-8", errors="ignore").strip()
                 if not line:
                     continue
+
                 value, lo = self._parse_line(line)
                 self._push(value, lo)
+                error_streak = 0
+            except ValueError as ve:
+                # Typically non-numeric bootloader messages or partial packet at startup
+                error_streak += 1
+                if error_streak <= 5:
+                    logger.debug(f"Skipping unparseable serial line: {ve}")
+                elif error_streak % 100 == 0:
+                    logger.warning(
+                        f"Multiple unparseable lines received (last: '{line[:40]}'). "
+                        "Verify baud rate matches your microcontroller sketch."
+                    )
             except Exception as exc:
                 logger.warning(f"Serial read error: {exc}")
+                time.sleep(0.01)
 
-        ser.close()
+        try:
+            ser.close()
+        except Exception:
+            pass
+        self._hardware_connected = False
 
     def _mock_loop(self):
         """Generate synthetic ECG at exactly 250 Hz."""
         t  = 0.0
         dt = 1.0 / 250.0
+        self._hardware_connected = False
         while self._running:
             sample = _synthetic_ecg_sample(t) * 512 + 2048   # scale to ADC-like range
             self._push(sample, lead_off=False)
@@ -198,8 +258,60 @@ class SerialReader:
 
     @staticmethod
     def _parse_line(line: str) -> tuple:
-        """Parse a serial line into (adc_value: float, lead_off: bool)."""
-        if line.startswith("{"):
-            data = json.loads(line)
-            return float(data.get("v", 0)), bool(data.get("lo", 0))
-        return float(line), False
+        """Parse a serial line into (adc_value: float, lead_off: bool).
+
+        Supports:
+        - JSON: {"v": 2048, "lo": 0} or {"ecg": 2048, "lead_off": 0}
+        - Comma/Semicolon/Tab CSV: "1534,0" or "1534, 0" or "1534, 0, 0"
+        - Plain single float/int: "1534"
+        """
+        line = line.strip()
+        if not line:
+            raise ValueError("Empty line")
+
+        # 1. JSON
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                data = json.loads(line)
+                val = float(data.get("v", data.get("ecg", data.get("val", 0))))
+                lo = bool(data.get("lo", data.get("lead_off", 0)))
+                return val, lo
+            except Exception as err:
+                raise ValueError(f"JSON parse error: {err}")
+
+        # 2. Comma / Semicolon / Tab separated values
+        for sep in [",", ";", "\t"]:
+            if sep in line:
+                tokens = [t.strip() for t in line.split(sep) if t.strip()]
+                if not tokens:
+                    raise ValueError(f"No tokens with separator '{sep}'")
+                try:
+                    p0 = float(tokens[0])
+                    p1 = float(tokens[1]) if len(tokens) > 1 else 0.0
+
+                    if len(tokens) >= 3:
+                        # [ADC, LO+, LO-]
+                        p2 = float(tokens[2])
+                        lo = (p1 > 0.5) or (p2 > 0.5)
+                        val = p0
+                    elif len(tokens) == 2:
+                        # Normal order: [ADC, LO]
+                        # If p0 is 0 or 1 and p1 is a typical ADC reading (>10), reverse
+                        if p0 in (0.0, 1.0) and p1 > 10.0:
+                            val = p1
+                            lo = bool(int(p0))
+                        else:
+                            val = p0
+                            lo = bool(int(p1))
+                    else:
+                        val = p0
+                        lo = False
+                    return val, lo
+                except Exception as err:
+                    raise ValueError(f"Delimited parse error: {err}")
+
+        # 3. Plain numeric string (single ADC reading)
+        try:
+            return float(line), False
+        except ValueError:
+            raise ValueError(f"Unrecognized serial payload: '{line}'")

@@ -94,11 +94,19 @@ def create_app(
     @app.get("/status")
     async def status():
         return JSONResponse({
-            "mode":     "mock" if reader._mock else "serial",
-            "port":     reader.port,
-            "lead_off": reader.lead_off,
-            "model":    str(model_path),
-            "classes":  CLASS_NAMES,
+            "mode":               "mock" if reader._mock else "serial",
+            "port":               reader.port,
+            "baud":               reader.baud,
+            "hardware_connected": reader.hardware_connected,
+            "lead_off":           reader.lead_off,
+            "samples_received":   reader.samples_received,
+            "sample_rate":        round(reader.sample_rate, 1),
+            "is_ready":           reader.is_buffer_ready,
+            "window_samples":     2500,
+            "window_sec":         10.0,
+            "model":              str(model_path.name),
+            "model_path":         str(model_path),
+            "classes":            CLASS_NAMES,
         })
 
     # ------------------------------------------------------------------ WebSocket
@@ -110,34 +118,73 @@ def create_app(
 
         last_prediction = None
         pending = 0  # samples received since last inference
+        last_heartbeat = 0.0
 
         try:
+            import time
             while True:
                 new_samples = reader.pop_new_samples()
+                now = time.time()
 
                 if new_samples:
                     pending += len(new_samples)
 
-                    # Trigger inference every _INFERENCE_EVERY new samples
+                    # Trigger inference every _INFERENCE_EVERY new samples once 10s buffer ready
                     if pending >= _INFERENCE_EVERY and reader.is_buffer_ready:
                         pending = 0
                         window = reader.get_window()
                         try:
-                            last_prediction = engine.predict(window)
+                            last_prediction = engine.predict(window, lead_off=reader.lead_off)
                         except Exception as exc:
                             logger.warning(f"Inference error: {exc}")
 
-                    # Send samples in BATCH_SIZE chunks for smooth 10-FPS rendering
+                    # Status payload sent with updates
+                    status_info = {
+                        "hardware_connected": reader.hardware_connected,
+                        "mode":               "mock" if reader._mock else "serial",
+                        "port":               reader.port,
+                        "baud":               reader.baud,
+                        "sample_rate":        round(reader.sample_rate, 1),
+                        "samples_received":   reader.samples_received,
+                        "is_ready":           reader.is_buffer_ready,
+                        "progress_pct":       min(100.0, round(reader.samples_received / 2500.0 * 100, 1)),
+                        "progress_sec":       min(10.0, round(reader.samples_received / 250.0, 1)),
+                    }
+
+                    # Send samples in BATCH_SIZE chunks for smooth rendering
                     for i in range(0, len(new_samples), BATCH_SIZE):
                         chunk = new_samples[i : i + BATCH_SIZE]
                         await websocket.send_text(json.dumps({
-                            "ecg":        chunk,
-                            "lead_off":   reader.lead_off,
-                            "prediction": last_prediction,
+                            "ecg":           chunk,
+                            "lead_off":      reader.lead_off,
+                            "prediction":    last_prediction,
+                            "system_status": status_info,
                         }))
+                    last_heartbeat = now
+                else:
+                    # Heartbeat if no samples arriving (e.g. idle or serial waiting)
+                    if now - last_heartbeat >= 0.5:
+                        status_info = {
+                            "hardware_connected": reader.hardware_connected,
+                            "mode":               "mock" if reader._mock else "serial",
+                            "port":               reader.port,
+                            "baud":               reader.baud,
+                            "sample_rate":        round(reader.sample_rate, 1),
+                            "samples_received":   reader.samples_received,
+                            "is_ready":           reader.is_buffer_ready,
+                            "progress_pct":       min(100.0, round(reader.samples_received / 2500.0 * 100, 1)),
+                            "progress_sec":       min(10.0, round(reader.samples_received / 250.0, 1)),
+                        }
+                        await websocket.send_text(json.dumps({
+                            "ecg":           [],
+                            "lead_off":      reader.lead_off,
+                            "prediction":    last_prediction,
+                            "system_status": status_info,
+                        }))
+                        last_heartbeat = now
 
-                # 100 ms sleep keeps CPU usage low and yields to asyncio
-                await asyncio.sleep(0.1)
+                # 50 ms sleep keeps UI responsive while maintaining low CPU usage
+                await asyncio.sleep(0.05)
 
         except WebSocketDisconnect:
             logger.info("WebSocket client disconnected.")

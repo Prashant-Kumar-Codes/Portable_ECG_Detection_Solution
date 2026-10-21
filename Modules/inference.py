@@ -56,7 +56,7 @@ class InferenceEngine:
                 "Run Notebooks/N5_Training.ipynb first to train and save the model."
             )
         model = build_model(str(self.device))
-        checkpoint = torch.load(model_path, map_location=self.device)
+        checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
         if isinstance(checkpoint, dict):
             state_dict = checkpoint.get("model_state", checkpoint.get("model_state_dict", checkpoint))
         else:
@@ -67,7 +67,7 @@ class InferenceEngine:
         return model
 
     @torch.no_grad()
-    def predict(self, raw_window: np.ndarray) -> dict:
+    def predict(self, raw_window: np.ndarray, lead_off: bool = False) -> dict:
         """Classify a single 2500-sample ECG window.
 
         Parameters
@@ -75,6 +75,8 @@ class InferenceEngine:
         raw_window : np.ndarray
             1-D array of 2500 raw samples from the ESP32 AD8232 ADC (0-4095)
             or float mV values. Z-score normalisation bridges the scale gap.
+        lead_off : bool, optional
+            True if electrodes are disconnected (AD8232 LO+ / LO- active).
 
         Returns
         -------
@@ -83,7 +85,17 @@ class InferenceEngine:
             class_name    : str   - human-readable label
             confidence    : float - softmax probability of predicted class
             probabilities : list  - softmax probs for all 5 classes
+            lead_off      : bool  - whether lead-off was triggered
         """
+        if lead_off:
+            return {
+                "class_id":      4,
+                "class_name":    "Noise / Artifact (Lead-Off)",
+                "confidence":    1.0,
+                "probabilities": [0.0, 0.0, 0.0, 0.0, 1.0],
+                "lead_off":      True,
+            }
+
         # source_fs=250: ESP32 already streams at target rate, no resampling
         x = preprocess_ecg_window(raw_window, source_fs=250, target_fs=250)
 
@@ -101,4 +113,5 @@ class InferenceEngine:
             "class_name":    CLASS_NAMES[class_id],
             "confidence":    round(confidence, 4),
             "probabilities": [round(float(p), 4) for p in probs],
+            "lead_off":      False,
         }

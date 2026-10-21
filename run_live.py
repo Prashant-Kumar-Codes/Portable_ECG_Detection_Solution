@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 """
 run_live.py
 -----------
@@ -112,6 +112,21 @@ def main():
         )
         sys.exit(1)
 
+    def _get_free_port(host: str, preferred_port: int) -> int:
+        import socket
+        for p in range(preferred_port, preferred_port + 20):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind((host, p))
+                    return p
+                except OSError:
+                    continue
+        return preferred_port
+
+    actual_port = _get_free_port(args.host, args.http_port)
+    if actual_port != args.http_port:
+        logger.warning(f"Port {args.http_port} is busy. Switched to available port {actual_port}.")
+
     logger.info("=" * 60)
     logger.info("  ECG Arrhythmia Monitor — Real-Time Inference Server")
     logger.info("=" * 60)
@@ -119,7 +134,7 @@ def main():
     logger.info(f"  Baud rate   : {args.baud}")
     logger.info(f"  Device      : {args.device}")
     logger.info(f"  Model       : {model_path}")
-    logger.info(f"  Dashboard   : http://{args.host}:{args.http_port}")
+    logger.info(f"  Dashboard   : http://{args.host}:{actual_port}")
     logger.info("=" * 60)
 
     app = create_app(
@@ -130,7 +145,7 @@ def main():
     )
 
     # Open browser after a short delay so the server has time to start
-    dashboard_url = f"http://127.0.0.1:{args.http_port}"
+    dashboard_url = f"http://127.0.0.1:{actual_port}"
     import threading, time
     def _open_browser():
         time.sleep(1.5)
@@ -147,7 +162,7 @@ def main():
     uvicorn.run(
         app,
         host=args.host,
-        port=args.http_port,
+        port=actual_port,
         log_level="info",
     )
 

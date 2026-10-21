@@ -42,6 +42,9 @@ All mapped in config.RHYTHM_TO_CLASS.
 - Z-score per window, not per patient or global
 
 ## Dataset Split Decision
-Split on case_id level (patient-wise) to prevent data leakage.
-Do NOT split on individual windows - same patient windows must stay in same split.
+## Normal Sinus Rhythm & Atrial Fibrillation Fix Verification (2026-10-21)
+- Root Cause: VitalDB annotation CSVs use beat abbreviations ('N', 'AFIB/AFL', etc.). The initial RHYTHM_TO_CLASS dictionary had only long strings, causing all normal and atrial fibrillation beats to be mapped to None and skipped.
+- Fix: config.RHYTHM_TO_CLASS updated with all shorthand strings ('N', 'AFIB/AFL', 'SVTA', 'VT', etc.).
+- Real-data test confirmed: Case 337 produced hundreds of Class 0 (Normal) windows; Case 1023 produced 628 Class 1 (AFIB) windows.
+- To produce non-zero support in the final trained model, N3_Dataset_Builder.ipynb Cell 5 must be run to completion (FORCE_REBUILD=True) to generate the new .npz cache files, followed by retraining in N5_Training.ipynb with force_retrain=True.
 

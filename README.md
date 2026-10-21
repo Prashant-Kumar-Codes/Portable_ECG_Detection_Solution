@@ -1,62 +1,162 @@
 # AI-Based Single-Lead ECG Arrhythmia Detection
-**1D CNN-BiLSTM | VitalDB Dataset | PyTorch**
+**1D CNN-BiLSTM | VitalDB Dataset | Real-Time Hardware Inference | PyTorch**
 
-## Project Summary
-End-to-end ML pipeline for classifying single-lead ECG recordings (Lead II) into 5 arrhythmia categories using a hybrid 1D CNN + Bidirectional LSTM architecture trained on the VitalDB Arrhythmia Database (482 surgical patients).
+---
 
-## 5 Output Classes
-| # | Label | Description |
-|---|-------|-------------|
-| 0 | Normal Sinus Rhythm | Clean NSR signal |
-| 1 | Atrial Fibrillation | Irregular R-R, absent P-waves |
-| 2 | Supraventricular Arrhythmia | SVT, PAE, WAP/MAT, SND, AVB |
-| 3 | Ventricular Arrhythmia | VT, PVE |
-| 4 | Noise / Artifact | Noisy or poor-quality signal |
+## 1. Project Summary
+End-to-end deep learning system for classifying single-lead ECG recordings (Lead II) into 5 diagnostic arrhythmia categories using a hybrid **1D CNN + Bidirectional LSTM** architecture.
 
-## Repository Structure
-Modules/config.py -- All constants (single source of truth)
-Modules/preprocessing.py -- Shared DSP pipeline
-Modules/dataset_builder.py -- VitalDB downloader, windowing, ECGWindowDataset
-Modules/model.py -- ECGCNNBiLSTM PyTorch architecture
-Modules/train.py -- Trainer, evaluate(), class weights
-Notebooks/N1_Data_Understanding.ipynb -- Dataset exploration
-Notebooks/N2_Preprocessing.ipynb -- DSP pipeline validation
-Notebooks/N3_Dataset_Builder.ipynb -- Build windowed .npz cache
-Notebooks/N4_Model.ipynb -- Architecture inspection
-Notebooks/N5_Training.ipynb -- Training run and evaluation
-Dataset/ecg_1_lead_dataset/ -- Raw annotation CSVs and metadata
-Dataset/Output_Data/ -- Generated .npz files and saved models
+- **Offline Training**: Trained on the VitalDB Arrhythmia Database (482 surgical patients, 500 Hz resampled to 250 Hz).
+- **Online Telemetry**: Connects directly to an AD8232 ECG sensor via ESP32 / Arduino serial UART (250 Hz) or mock generator.
+- **Live AI Dashboard**: Real-time browser dashboard featuring dynamic auto-scaling waveforms, 10-second calibration/recording tracking, system health diagnostics, and continuous classification every 2 seconds.
 
-## Quickstart
-pip install torch numpy scipy pandas scikit-learn matplotlib seaborn vitaldb
+---
 
-Run notebooks in order: N1 -> N2 -> N3 (builds dataset, 20-60 min) -> N4 -> N5
+## 2. 5 Output Classes
+| # | Label | Clinical Description |
+|---|-------|----------------------|
+| **0** | **Normal Sinus Rhythm** | Regular rhythm, consistent P-QRS-T morphology |
+| **1** | **Atrial Fibrillation** | Irregular R-R intervals, absence of distinct P-waves |
+| **2** | **Supraventricular Arrhythmia** | Atrial premature beats, SVT, AV blocks, junctional rhythms |
+| **3** | **Ventricular Arrhythmia** | Ventricular tachycardia, premature ventricular contractions |
+| **4** | **Noise / Artifact** | Baseline wander, electrode disconnect, motion artifacts |
 
-## Model Architecture
-Input: (B, 1, 2500)  [batch, channel, 10s at 250Hz]
-1D CNN (4 blocks): 2500 -> 78 tokens, 128 channels
-BiLSTM (2 layers, hidden=128, bidirectional): 78 tokens -> (B, 256)
-Classifier: Linear(256, 64) -> ReLU -> Dropout -> Linear(64, 5)
-Output: (B, 5) raw logits
-Total parameters: 782,213
+---
 
-## Preprocessing Pipeline
-1. Replace NaN/Inf with 0.0
-2. Resample 500 Hz -> 250 Hz (scipy.resample_poly, 1:2 ratio)
-3. Zero-phase Butterworth bandpass filter (0.5-40 Hz, order=4, filtfilt)
-4. Per-window Z-score normalisation
+## 3. Hardware Architecture & Pinout
+Connect the **AD8232 Heart Rate Monitor Module** to your ESP32 or Arduino as follows:
 
+| AD8232 Pin | ESP32 Pin | Arduino Uno/Nano | Description |
+|------------|-----------|------------------|-------------|
+| **OUTPUT** | GPIO 34 (ADC1_CH6) | A0 | Analog ECG signal (0–3.3V / 0–5V) |
+| **LO+**    | GPIO 32   | D10 | Lead-Off positive detection |
+| **LO-**    | GPIO 33   | D11 | Lead-Off negative detection |
+| **3.3V**   | 3.3V      | 3.3V / 5V | Sensor power supply |
+| **GND**    | GND       | GND | Common ground |
 
+Electrode placement (**Lead II standard**):
+- **RA (Red)**: Right clavicle / right arm.
+- **LA (Yellow)**: Left clavicle / left arm.
+- **RL (Green)**: Right lower abdomen / right leg (reference ground).
 
-## Install dependencies (one-time)
-``` run commands
+---
+
+## 4. Supported Serial Protocols (115200 Baud)
+The Python acquisition engine automatically detects and parses any of the following newline-delimited formats:
+
+1. **Comma-Separated Values (CSV)** *(Standard Arduino/ESP32)*:
+   ```text
+   1534,0
+   1607,0
+   ```
+   *(Format: `<ADC_Value>,<Lead_Off_Flag>` or `<ADC_Value>,<LO+>,<LO->`)*
+
+2. **JSON Stream** *(From `firmware/esp32_ad8232_250hz/esp32_ad8232_250hz.ino`)*:
+   ```json
+   {"v": 2048, "lo": 0}
+   ```
+
+3. **Plain Raw ADC Integers**:
+   ```text
+   1534
+   ```
+
+---
+
+## 5. DSP Preprocessing Pipeline
+Applied identically during model training and real-time live inference:
+1. **Sanitisation**: Replace `NaN` and `Inf` with `0.0`.
+2. **Resampling**: 500 Hz downsampled to 250 Hz (`scipy.signal.resample_poly`, 1:2 ratio). Live hardware streams natively at 250 Hz.
+3. **Bandpass Filtering**: 4th-order zero-phase Butterworth filter (0.5–40 Hz) via `scipy.signal.filtfilt` to remove baseline drift and high-frequency powerline noise.
+4. **Per-Window Z-Score Normalisation**: $\frac{x - \mu}{\sigma + 10^{-6}}$. Normalises amplitude differences between patient skin impedance and ADC resolutions.
+
+---
+
+## 6. Model Architecture
+- **Input**: $(B, 1, 2500)$ — 10 seconds of Lead-II ECG @ 250 Hz.
+- **1D CNN Feature Extractor (4 Blocks)**:
+  - Block 1: `Conv1d(1, 32, k=15, s=2, p=7)` + BatchNorm + ReLU + MaxPool(2) $\rightarrow L=625$
+  - Block 2: `Conv1d(32, 64, k=7, p=3)` + BatchNorm + ReLU + MaxPool(2) $\rightarrow L=312$
+  - Block 3: `Conv1d(64, 128, k=5, p=2)` + BatchNorm + ReLU + MaxPool(2) $\rightarrow L=156$
+  - Block 4: `Conv1d(128, 128, k=3, p=1)` + BatchNorm + ReLU + MaxPool(2) $\rightarrow L=78$
+- **Temporal Sequence Modeling**: 2-layer Bidirectional LSTM (hidden dimension 128) with Global Average Pooling $\rightarrow (B, 256)$.
+- **Classification Head**: `Linear(256, 64)` $\rightarrow$ ReLU $\rightarrow$ Dropout(0.3) $\rightarrow$ `Linear(64, 5)`.
+- **Total Parameters**: 782,213.
+
+---
+
+## 7. Live Telemetry Dashboard Features
+- **System Health Badges**:
+  - **Hardware Connection**: Displays active port and baud rate (e.g. `COM5 Connected (115200)`) or `Mock Mode`.
+  - **Lead-Off Detection**: Instant visual alert (`⚠️ Lead-Off!`) if an electrode detaches from skin.
+  - **Real-Time Sampling Rate**: Measures incoming packets per second (target: `250.0 Hz`).
+  - **Model Status**: Confirms model weights loaded on CPU/CUDA.
+- **10-Second Warmup & Calibration Tracker**:
+  - Displays a live progress bar (`0.0s / 10.0s`) while accumulating the initial 2500-sample clinical diagnostic window.
+  - Automatically transitions to continuous inference (2-second sliding stride) once calibrated.
+- **Dynamic Waveform Auto-Scaling**:
+  - Automatically fits the Y-axis to the sensor's active dynamic range with 20% margin, avoiding flatline compression artifacts.
+- **Live Signal Telemetry**:
+  - Live ADC count, Peak-to-Peak (Vpp) amplitude, baseline count, and estimated Heart Rate (BPM).
+
+---
+
+## 8. Installation & Running
+
+### Install Dependencies
+```bash
 pip install -r requirements.txt
-# --- Mock mode (no hardware, uses synthetic waveform) ---
-python run_live.py
-# --- With ESP32 on Windows ---
-python run_live.py --port COM3
-# --- With ESP32 on Linux ---
-python run_live.py --port /dev/ttyUSB0
-# --- GPU inference ---
-python run_live.py --port COM3 --device cuda
 ```
+
+### Run Live Server
+
+```bash
+# --- 1. Mock Mode (no hardware, synthetic ECG) ---
+python run_live.py
+
+# --- 2. Live Hardware (Windows COM Port) ---
+python run_live.py --port COM5
+
+# --- 3. Live Hardware (Linux / macOS) ---
+python run_live.py --port /dev/ttyUSB0
+
+# --- 4. Custom Port & GPU Acceleration ---
+python run_live.py --port COM5 --http-port 8080 --device cuda
+```
+*Note: If port 8000 is busy, `run_live.py` automatically binds to the next free port and opens the browser.*
+
+---
+
+## 9. Repository Structure
+```text
+├── Dataset/
+│   ├── ecg_1_lead_dataset/       # Raw metadata & VitalDB annotation files
+│   └── Output_Data/saved_models/ # Saved model checkpoint (best_ecg_cnn_bilstm.pt)
+├── Modules/
+│   ├── config.py                 # Central configuration constants
+│   ├── preprocessing.py          # Shared DSP bandpass + normalisation
+│   ├── dataset_builder.py        # Windowing & dataset pipeline
+│   ├── model.py                  # PyTorch ECGCNNBiLSTM architecture
+│   ├── train.py                  # Training loop & evaluation
+│   ├── inference.py              # Real-time inference engine
+│   ├── serial_reader.py          # Multi-format serial buffer & metrics
+│   └── server.py                 # FastAPI backend & WebSocket stream
+├── Notebooks/
+│   ├── N1_Data_Understanding.ipynb
+│   ├── N2_Preprocessing.ipynb
+│   ├── N3_Dataset_Builder.ipynb
+│   ├── N4_Model.ipynb
+│   └── N5_Training.ipynb
+├── docs/                         # Architecture, Design, Tasks, PRD
+├── firmware/
+│   └── esp32_ad8232_250hz/       # ESP32 250 Hz hardware timer sketch
+├── static/
+│   └── index.html                # Professional live telemetry dashboard
+├── run_live.py                   # Unified CLI runner
+└── requirements.txt              # Project dependencies
+```
+
+---
+
+## 10. Clinical Disclaimer
+This system is an **educational and engineering research prototype**. It is not a certified medical device and must not be used as a substitute for professional clinical diagnosis or patient monitoring.

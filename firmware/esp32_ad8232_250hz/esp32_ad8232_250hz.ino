@@ -1,4 +1,4 @@
-﻿/*
+/*
  * esp32_ad8232_250hz.ino
  * ----------------------
  * ESP32 firmware for the AD8232 ECG sensor module.

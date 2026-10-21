@@ -71,7 +71,8 @@ def assign_label(rhythm_label: str, bad_signal_quality: bool) -> Optional[int]:
     """
     if bad_signal_quality:
         return 4
-    return RHYTHM_TO_CLASS.get(rhythm_label, None)
+    clean_label = str(rhythm_label).strip()
+    return RHYTHM_TO_CLASS.get(clean_label, None)
 
 
 def get_window_label(
