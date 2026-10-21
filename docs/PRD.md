@@ -10,7 +10,7 @@ Here is your updated, formal **Project Description** reflecting the switch to th
 
 The **AI-Based Single-Lead ECG Arrhythmia Detection System** is a hardware-integrated, full-stack web application designed to acquire single-lead electrocardiogram (ECG) signals from a human subject using a three-electrode ECG sensor and analyze them in real time using a hybrid deep learning architecture (**1D CNN-BiLSTM**).
 
-Unlike traditional models trained on 12-lead clinical datasets that suffer from domain shift when deployed on low-cost single-lead hardware, this system trains natively on single-lead (`ECG_II`) recordings from the **VitalDB Arrhythmia Database**. By combining 1D Convolutional layers (for morphological P-QRS-T feature extraction) with Bidirectional Long Short-Term Memory networks (for temporal R-R interval rhythm modeling), the system identifies cardiac rhythm abnormalities and signal noise, streaming real-time waveforms and diagnostic insights to a web dashboard.
+Unlike traditional models trained on 12-lead clinical datasets that suffer from domain shift when deployed on low-cost single-lead hardware, this system trains natively on single-lead (`ECG_II`) recordings from the **VitalDB Arrhythmia Database**. Link of the Dataset: https://physionet.org/content/vitaldb-arrhythmia/1.0.0/ . By combining 1D Convolutional layers (for morphological P-QRS-T feature extraction) with Bidirectional Long Short-Term Memory networks (for temporal R-R interval rhythm modeling), the system identifies cardiac rhythm abnormalities and signal noise, streaming real-time waveforms and diagnostic insights to a web dashboard.
 
 ### 2. Project Objectives
 
