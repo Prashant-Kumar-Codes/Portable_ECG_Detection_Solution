@@ -280,6 +280,29 @@ class SerialReader:
                         f"Multiple unparseable lines received (last: '{line[:40]}'). "
                         "Verify baud rate matches your microcontroller sketch."
                     )
+            except (serial.SerialException, OSError) as exc:
+                self._hardware_connected = False
+                logger.warning(f"Serial connection interrupted on {self.port}: {exc}. Reconnecting...")
+                try:
+                    ser.close()
+                except Exception:
+                    pass
+                time.sleep(2.0)
+                while self._running:
+                    try:
+                        ser = serial.Serial(self.port, self.baud, timeout=1.0)
+                        try:
+                            ser.dtr = False
+                            ser.rts = False
+                            time.sleep(0.1)
+                            ser.reset_input_buffer()
+                        except Exception:
+                            pass
+                        logger.info(f"Reconnected successfully to {self.port} at {self.baud} baud.")
+                        last_rx_time = time.time()
+                        break
+                    except Exception:
+                        time.sleep(1.0)
             except Exception as exc:
                 logger.warning(f"Serial read error: {exc}")
                 time.sleep(0.01)
@@ -348,6 +371,8 @@ class SerialReader:
                     p1 = float(tokens[1]) if len(tokens) > 1 else 0.0
                     if len(tokens) >= 3:
                         p2 = float(tokens[2])
+                        if p2 > 10.0 and p0 in (0.0, 1.0) and p1 in (0.0, 1.0):
+                            return p2, bool(p0 > 0.5 or p1 > 0.5)
                         return p0, bool(p1 > 0.5 or p2 > 0.5)
                     elif len(tokens) == 2:
                         if p0 in (0.0, 1.0) and p1 > 10.0:

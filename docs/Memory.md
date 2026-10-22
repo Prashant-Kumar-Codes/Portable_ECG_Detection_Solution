@@ -48,3 +48,15 @@ All mapped in config.RHYTHM_TO_CLASS.
 - Real-data test confirmed: Case 337 produced hundreds of Class 0 (Normal) windows; Case 1023 produced 628 Class 1 (AFIB) windows.
 - To produce non-zero support in the final trained model, N3_Dataset_Builder.ipynb Cell 5 must be run to completion (FORCE_REBUILD=True) to generate the new .npz cache files, followed by retraining in N5_Training.ipynb with force_retrain=True.
 
+## Hardware & Serial Acquisition Decisions (2026-10-22)
+- **ESP32 ADC in ISR Panic**: `analogRead()` invokes FreeRTOS mutexes and ADC calibration that are not IRAM-safe. Calling it inside a timer interrupt (`onTimer()`) triggers an interrupt watchdog timeout crash (`Guru Meditation Error: Core 1 panic'ed`). Non-blocking `micros()` timing inside `loop()` is universally stable across all ESP32 and Arduino cores.
+- **PySerial DTR/RTS Reset Line Lock**: Windows serial drivers assert DTR and RTS by default when opening a COM port. On ESP32 boards with auto-reset circuitry (CH340/CP2102), this holds the `EN` pin LOW in hardware reset. Setting `ser.dtr = False; ser.rts = False` immediately after opening prevents board freezing.
+- **Bluetooth Virtual COM Trap**: Windows assigns Bluetooth serial links (e.g., `COM3`, `COM4`) that open successfully in PySerial but never produce bytes. Port auto-detection explicitly filters for physical USB-UART bridges (`CH340`, `CP210`, `FTDI`).
+- **USB Cable PnP Code 45**: Charge-only USB cables power on the ESP32 and AD8232 (LEDs light up) but lack D+/D- data lines. Device Manager shows `Problem 45: Device not connected`. A full 4-wire data cable is required.
+- **Dynamic Liveness Tracking**: `SerialReader` tracks incoming byte timestamps. If no packets arrive for 3 seconds, `hardware_connected` drops to `False` and sample rate drops to 0.0 Hz, triggering diagnostic hints in the UI.
+
+## Model Training & Metric Monitoring Decisions (2026-10-22)
+- **Monitoring Metric (Loss vs. Macro-F1)**: Cross-entropy loss on imbalanced ECG datasets can rise as the network becomes confident/penalized on minority classes even while discrete accuracy and Macro-F1 continue to improve. `MONITOR_METRIC` is configurable in `config.py` (default: `"val_f1"`, `mode="max"`), capturing the best clinical diagnostic checkpoint.
+- **Side-by-Side Train vs. Val Metrics**: `train.py` computes both training and validation metrics (`loss`, `accuracy`, `macro_f1`) per epoch, allowing detection of overfitting or underfitting. Checkpoints store `train_metrics`, `val_metrics`, and the full 6-metric `history`.
+- **Jupyter Notebook Caching**: `import config` is cached in `sys.modules`. Edits to `config.py` on disk do not propagate to a running notebook without a kernel restart or `%load_ext autoreload; %autoreload 2`. Explicit keyword arguments in `Trainer(max_epochs=..., patience=..., monitor=...)` should be supported for interactive use.
+

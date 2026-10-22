@@ -104,6 +104,12 @@ RHYTHM_TO_CLASS = {
 | **Old Cache Loaded** | Existing `windows_*.npz` files may have been built before the mapping fix | Set `FORCE_REBUILD = True` in [N3_Dataset_Builder.ipynb](file:///d:/Codes/Projects/Portable_ECG_Detection_Solution/Notebooks/N3_Dataset_Builder.ipynb) (Cell 5) to download and regenerate the dataset. |
 | **Build Interruption** | Downloading 482 cases from VitalDB takes 25–45 minutes over internet; stopping early discards unsaved split | Allow Cell 5 in N3 to run to completion. Status logs report progress every 10 cases. |
 | **Model Retrain Skipped** | `Trainer.run()` checks `skip_if_exists=True` and skips training if `best_ecg_cnn_bilstm.pt` is found | Use `trainer.run(force_retrain=True)` in [N5_Training.ipynb](file:///d:/Codes/Projects/Portable_ECG_Detection_Solution/Notebooks/N5_Training.ipynb) when retraining on the newly rebuilt dataset. |
+| **Loss vs. F1 Checkpoint Miss** | Loss can increase due to probability calibration penalties while Macro-F1 continues to improve | Configured `MONITOR_METRIC = "val_f1"` (`mode="max"`) in [config.py](file:///d:/Codes/Projects/Portable_ECG_Detection_Solution/Modules/config.py) and [train.py](file:///d:/Codes/Projects/Portable_ECG_Detection_Solution/Modules/train.py) so early stopping and checkpoints capture optimal clinical accuracy. |
+| **Jupyter Config Caching** | `import config` cached in `sys.modules`; disk edits to `config.py` not recognized in running kernel | Pass parameters explicitly to `Trainer(...)` or run `%load_ext autoreload; %autoreload 2` in Notebook Cell 1. |
+| **ESP32 FreeRTOS ISR Panic** | `analogRead()` called in hardware timer ISR violates IRAM safety, causing `Interrupt wdt timeout` crash loop | Refactored [firmware](file:///d:/Codes/Projects/Portable_ECG_Detection_Solution/firmware/esp32_ad8232_250hz/esp32_ad8232_250hz.ino) to non-blocking `micros()` 250 Hz timing in `loop()`; added GPIO 2 heartbeat LED. |
+| **PySerial DTR/RTS Reset Lock** | Windows serial driver asserts DTR/RTS on open, locking ESP32 in reset/bootloader mode | [serial_reader.py](file:///d:/Codes/Projects/Portable_ECG_Detection_Solution/Modules/serial_reader.py) explicitly clears `ser.dtr = False; ser.rts = False` and resets input buffer. |
+| **Virtual Bluetooth Trap** | Windows `COM3`/`COM4` Bluetooth ports open without error but produce 0 bytes | [run_live.py](file:///d:/Codes/Projects/Portable_ECG_Detection_Solution/run_live.py) filters out Bluetooth links and prioritizes physical USB-UART bridges (`CH340`, `CP210`, `FTDI`). |
+| **USB Cable Missing Data Lines** | Charge-only cable powers ESP32 but lacks D+/D- lines (Windows PnP Code 45) | [index.html](file:///d:/Codes/Projects/Portable_ECG_Detection_Solution/static/index.html) auto-displays dynamic diagnostic troubleshooting hints when "No Incoming Bytes" occurs. |
 | **Hardware Disconnect** | AD8232 electrode lead detached during real-time streaming | Firmware transmits `lo: 1` (`!LO` packet); [server.py](file:///d:/Codes/Projects/Portable_ECG_Detection_Solution/Modules/server.py) flags `lead_off: true`; frontend displays yellow "Lead-Off" overlay. |
 | **Missing Serial Hardware** | ESP32 not plugged in when running [run_live.py](file:///d:/Codes/Projects/Portable_ECG_Detection_Solution/run_live.py) | [serial_reader.py](file:///d:/Codes/Projects/Portable_ECG_Detection_Solution/Modules/serial_reader.py) automatically activates Mock Mode with synthetic 250 Hz ECG. |
 
@@ -114,5 +120,14 @@ RHYTHM_TO_CLASS = {
 2. Run [N5_Training.ipynb](file:///d:/Codes/Projects/Portable_ECG_Detection_Solution/Notebooks/N5_Training.ipynb) with `force_retrain=True`.
 3. Launch the live real-time dashboard with:
    ```bash
-   python run_live.py
+   python run_live.py --port COM5
    ```
+
+---
+
+## 5. Live Hardware Acquisition & Training Diagnostic Verification (2026-10-22)
+
+- **Firmware Non-Blocking Sampling**: Verified at 250 Hz using `SAMPLE_INTERVAL_US = 4000` via `micros()`. Zero interrupt watchdog crashes. GPIO 2 heartbeat LED toggles every 500 ms for visual status confirmation.
+- **Serial Transmission**: Verified live on `COM5` (Silicon Labs CP210x USB to UART Bridge). Streaming raw ADC values and lead-off flags without DTR/RTS bootloader lock.
+- **Telemetry UI**: Waveform auto-scales dynamically; 10s warmup bar counts up from 0.0s to 10.0s; BPM ticker calculates estimated heart rate from detected peaks; diagnostic warning banner dynamically guides the user if packet rates drop to 0.0 Hz.
+- **Training Metric Logging**: `train.py` computes and prints side-by-side training and validation metrics (`train_loss`, `train_acc`, `train_f1` vs `val_loss`, `val_acc`, `val_f1`), saving complete histories into model checkpoints.

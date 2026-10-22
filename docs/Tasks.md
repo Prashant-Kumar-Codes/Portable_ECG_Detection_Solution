@@ -28,22 +28,27 @@
 ## Phase 5: Training & Persistence (N5_Training.ipynb + Modules/train.py) [DONE]
 - [x] Compute robust balanced class weights for CrossEntropyLoss (handles absent classes with neutral 1.0 weight)
 - [x] Implement training loop with ReduceLROnPlateau and EarlyStopping
+- [x] Configurable metric monitor (MONITOR_METRIC="val_f1", "val_loss", "val_acc") with min/max mode direction
+- [x] Per-epoch training metrics calculation (train_loss, train_accuracy, train_macro_f1) alongside validation metrics
 - [x] Checkpoint persistence guarded with Path.exists() (skips retraining if best checkpoint exists)
-- [x] Generate training history plots (loss, accuracy, macro-F1)
+- [x] Checkpoint structure saving train_metrics, val_metrics, and full 6-metric history
+- [x] Generate training history plots (loss, accuracy, macro-F1 for both train and val)
 - [x] Test evaluation with classification report and confusion matrix plotting
 
 ## Phase 6: Real-Time Hardware Inference Server [DONE]
 - [x] Modules/inference.py — InferenceEngine: loads .pt checkpoint, preprocess + forward pass, returns class/confidence/probs
 - [x] Modules/inference.py — Lead-off detection awareness: auto-routes to Noise / Artifact with lead_off flag
 - [x] Modules/serial_reader.py — SerialReader: thread-safe 2500-sample ring buffer, DTR/RTS line control, auto-reconnect on disconnect, active liveness rate tracking
-- [x] Modules/serial_reader.py — Multi-format parser: supports CSV ("1534,0"), JSON ({"v":...,"lo":...}), and plain int values
+- [x] Modules/serial_reader.py — Multi-format parser: supports CSV ("1534,0"), JSON ({"v":...,"lo":...}), plain int, and 3-token formats
 - [x] Modules/serial_reader.py — Health telemetry: tracks hardware connection state, sample rate (Hz), and samples received
 - [x] Modules/server.py — FastAPI: GET / serves dashboard, WS /ws/ecg streams ECG + predictions every 2 sec + status heartbeat
 - [x] static/index.html — Dashboard: dynamic auto-scaling Chart.js ECG waveform + real-time health diagnostic pills
+- [x] static/index.html — Diagnostic troubleshooting box: auto-displays actionable hints when "No Incoming Bytes" is detected
 - [x] static/index.html — 10-Second Warmup Tracker: live progress bar (0-10s) with calibration state transition
 - [x] static/index.html — Signal metrics: Live ADC, Peak-to-Peak (Vpp), baseline, and estimated BPM ticker
 - [x] run_live.py — Single entry point: CLI args, auto USB port detection (Bluetooth filter), port collision resolution, auto-opens browser
 - [x] firmware/esp32_ad8232_250hz.ino — Non-blocking 250 Hz micros() loop + GPIO 2 heartbeat LED; eliminated fatal analogRead in ISR
+- [x] Hardware verification — Live streaming verified on COM5 with physical ESP32 and AD8232
 - [x] requirements.txt — All runtime dependencies (torch, numpy, scipy, fastapi, uvicorn, pyserial)
 
 ## Phase 7: Next Steps (TODO after the hardware part work well)

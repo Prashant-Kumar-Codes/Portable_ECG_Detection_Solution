@@ -36,3 +36,23 @@
    - Added a troubleshooting hint box that dynamically appears whenever "No Incoming Bytes" is detected, instructing the user to check cable data support, Device Manager, and baud rate.
 
 ---
+
+## 2. Model Checkpoint Not Updating Despite Higher Accuracy/F1 & Early Stopping Not Triggering
+
+### Observed Symptoms
+- Training runs past patience limit (e.g., reaching Epoch 10 even when `EARLY_STOP_PATIENCE = 3`).
+- Better classification performance (e.g., higher `val_acc` and `val_f1` at Epoch 4: 0.7748 and Epoch 8: 0.7959) does not trigger checkpoint saves.
+
+### Root Causes
+1. **Loss vs. Score Discrepancy**: Checkpointing in `train.py` was hardcoded to `val_metrics["loss"] < best_val_loss`. Cross-entropy loss on imbalanced multi-class data frequently increases as the model becomes overconfident or heavily penalized on rare classes, even while discrete decision boundaries (`val_acc` and `val_macro_f1`) continue to improve. Since `val_loss` at Epochs 4-10 (>0.50) was higher than Epoch 2 (0.4943), no subsequent checkpoint was saved.
+2. **Jupyter Module Caching & Function Default Binding**: In Jupyter, `import config` is cached in `sys.modules`. Modifying `config.py` on disk does not update values in memory without a kernel restart or `%autoreload 2`. Furthermore, `Trainer.__init__` bound default arguments at module definition time.
+
+### Solutions Applied
+1. **Configurable Metric Monitoring (`Modules/train.py` & `Modules/config.py`)**:
+   - Added `MONITOR_METRIC` (default: `"val_f1"`, or optionally `"val_loss"`, `"val_acc"`).
+   - Checkpointing and early stopping now track the designated metric (mode `"max"` for Macro-F1 / Accuracy, mode `"min"` for Loss).
+   - Initialization logging explicitly outputs `patience`, `max_epochs`, and `monitor (mode)` for full transparency.
+2. **Jupyter Interactive Workflow**:
+   - Use `%load_ext autoreload` + `%autoreload 2` in Notebook Cell 1 or pass `patience=config.EARLY_STOP_PATIENCE, monitor=config.MONITOR_METRIC` directly into `Trainer(...)`.
+
+---

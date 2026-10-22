@@ -26,6 +26,7 @@ from config import (
     NUM_CLASSES, CLASS_NAMES, BATCH_SIZE, LEARNING_RATE,
     MAX_EPOCHS, EARLY_STOP_PATIENCE, LR_SCHEDULER_PATIENCE,
     LR_SCHEDULER_FACTOR, BEST_MODEL_PATH, OUTPUT_DATA_DIR,
+    MONITOR_METRIC,
 )
 from model import ECGCNNBiLSTM, build_model
 from dataset_builder import ECGWindowDataset
@@ -198,6 +199,7 @@ class Trainer:
         learning_rate: float = LEARNING_RATE,
         max_epochs:    int   = MAX_EPOCHS,
         patience:      int   = EARLY_STOP_PATIENCE,
+        monitor:       str   = MONITOR_METRIC,
         data_dir:      Path  = OUTPUT_DATA_DIR,
         save_path:     Path  = BEST_MODEL_PATH,
         skip_if_exists: bool = True,
@@ -207,11 +209,26 @@ class Trainer:
         self.learning_rate = learning_rate
         self.max_epochs    = max_epochs
         self.patience      = patience
+        self.monitor       = monitor
         self.data_dir      = Path(data_dir)
         self.save_path     = Path(save_path)
         self.skip_if_exists = skip_if_exists
 
-        logger.info(f"Trainer initialised | device={self.device} | skip_if_exists={self.skip_if_exists}")
+        # Configure monitoring mode and target metric
+        if self.monitor in ("val_loss", "loss"):
+            self.metric_key = "loss"
+            self.mode = "min"
+        elif self.monitor in ("val_acc", "val_accuracy", "accuracy"):
+            self.metric_key = "accuracy"
+            self.mode = "max"
+        else:  # "val_f1", "val_macro_f1", or default
+            self.metric_key = "macro_f1"
+            self.mode = "max"
+
+        logger.info(
+            f"Trainer initialised | device={self.device} | max_epochs={self.max_epochs} | "
+            f"patience={self.patience} | monitor={self.monitor} ({self.mode}) | skip_if_exists={self.skip_if_exists}"
+        )
 
     def _build_loaders(self) -> tuple[DataLoader, DataLoader, DataLoader]:
         """Load all three splits and return DataLoaders."""
@@ -257,7 +274,14 @@ class Trainer:
             model = build_model(self.device)
             checkpoint = torch.load(self.save_path, map_location=self.device)
             model.load_state_dict(checkpoint["model_state"])
-            criterion = nn.CrossEntropyLoss()
+            if "val_metrics" in checkpoint:
+                vm = checkpoint["val_metrics"]
+                tm = checkpoint.get("train_metrics", {})
+                logger.info(
+                    f"Saved Checkpoint Performance (Epoch {checkpoint.get('epoch', '?')}):\n"
+                    f"  Train: loss={tm.get('loss', 0.0):.4f} | acc={tm.get('accuracy', 0.0):.4f} | f1={tm.get('macro_f1', 0.0):.4f}\n"
+                    f"  Val:   loss={vm.get('loss', 0.0):.4f} | acc={vm.get('accuracy', 0.0):.4f} | f1={vm.get('macro_f1', 0.0):.4f}"
+                )
             test_metrics = evaluate(model, test_loader, criterion, self.device)
             logger.info(
                 f"\nLoaded Checkpoint Test Results:\n"
@@ -289,9 +313,12 @@ class Trainer:
         )
 
         # Training loop
-        best_val_loss = float("inf")
+        best_metric = float("inf") if self.mode == "min" else -float("inf")
         epochs_no_improve = 0
-        history = {"train_loss": [], "val_loss": [], "val_accuracy": [], "val_macro_f1": []}
+        history = {
+            "train_loss": [], "train_accuracy": [], "train_macro_f1": [],
+            "val_loss": [], "val_accuracy": [], "val_macro_f1": [],
+        }
 
         # Ensure destination directory exists
         self.save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -300,6 +327,9 @@ class Trainer:
             # -- Train --
             model.train()
             train_loss = 0.0
+            train_preds: list[int] = []
+            train_labels: list[int] = []
+
             for X_batch, y_batch in train_loader:
                 X_batch = X_batch.to(self.device)
                 y_batch = y_batch.to(self.device)
@@ -313,44 +343,58 @@ class Trainer:
                 optimizer.step()
                 train_loss += loss.item() * len(y_batch)
 
+                preds = logits.detach().argmax(dim=1)
+                train_preds.extend(preds.cpu().numpy().tolist())
+                train_labels.extend(y_batch.cpu().numpy().tolist())
+
             train_loss /= len(train_loader.dataset)
+            train_acc  = float(np.mean(np.array(train_preds) == np.array(train_labels)))
+            train_f1   = float(f1_score(train_labels, train_preds, average="macro", zero_division=0))
 
             # -- Validate --
             val_metrics = evaluate(model, val_loader, criterion, self.device)
             scheduler.step(val_metrics["loss"])
 
             history["train_loss"].append(train_loss)
+            history["train_accuracy"].append(train_acc)
+            history["train_macro_f1"].append(train_f1)
             history["val_loss"].append(val_metrics["loss"])
             history["val_accuracy"].append(val_metrics["accuracy"])
             history["val_macro_f1"].append(val_metrics["macro_f1"])
 
             logger.info(
                 f"Epoch {epoch:03d}/{self.max_epochs} | "
-                f"train_loss={train_loss:.4f} | "
-                f"val_loss={val_metrics['loss']:.4f} | "
-                f"val_acc={val_metrics['accuracy']:.4f} | "
-                f"val_f1={val_metrics['macro_f1']:.4f}"
+                f"Train: loss={train_loss:.4f} | acc={train_acc:.4f} | f1={train_f1:.4f} || "
+                f"Val: loss={val_metrics['loss']:.4f} | acc={val_metrics['accuracy']:.4f} | f1={val_metrics['macro_f1']:.4f}"
             )
 
             # -- Early stopping & checkpoint --
-            if val_metrics["loss"] < best_val_loss:
-                best_val_loss = val_metrics["loss"]
+            current_metric = val_metrics[self.metric_key]
+            improved = (current_metric < best_metric) if self.mode == "min" else (current_metric > best_metric)
+
+            if improved:
+                best_metric = current_metric
                 epochs_no_improve = 0
+                train_metrics = {"loss": train_loss, "accuracy": train_acc, "macro_f1": train_f1}
                 torch.save(
                     {
-                        "epoch":       epoch,
-                        "model_state": model.state_dict(),
-                        "optimizer":   optimizer.state_dict(),
-                        "val_metrics": val_metrics,
-                        "history":     history,
+                        "epoch":         epoch,
+                        "model_state":   model.state_dict(),
+                        "optimizer":     optimizer.state_dict(),
+                        "train_metrics": train_metrics,
+                        "val_metrics":   val_metrics,
+                        "history":       history,
                     },
                     self.save_path,
                 )
-                logger.info(f"  ✓ Best model saved to {self.save_path} (val_loss={best_val_loss:.4f})")
+                logger.info(
+                    f"  ✓ Best model saved to {self.save_path} "
+                    f"({self.monitor}={best_metric:.4f} | train_loss={train_loss:.4f} | val_loss={val_metrics['loss']:.4f} | val_f1={val_metrics['macro_f1']:.4f})"
+                )
             else:
                 epochs_no_improve += 1
                 if epochs_no_improve >= self.patience:
-                    logger.info(f"Early stopping at epoch {epoch} (no improvement for {self.patience} epochs)")
+                    logger.info(f"Early stopping at epoch {epoch} (no improvement in {self.monitor} for {self.patience} epochs)")
                     break
 
         # -- Final test evaluation --

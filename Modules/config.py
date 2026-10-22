@@ -30,7 +30,7 @@ TARGET_FS       = 250        # Hz — target (matches ESP32 hardware)
 RESAMPLE_UP     = 1          # resample_poly numerator   (500->250 is 1:2)
 RESAMPLE_DOWN   = 2          # resample_poly denominator
 
-WINDOW_SEC      = 10         # seconds per classification window
+WINDOW_SEC      = 5         # seconds per classification window
 WINDOW_SAMPLES  = TARGET_FS * WINDOW_SEC   # 2500 samples
 STRIDE_SAMPLES  = TARGET_FS * 2            # 500 samples = 2-second stride
 
@@ -107,9 +107,10 @@ CLASSIFIER_DROPOUT = 0.3
 # ---------------------------------------------------------------------------
 BATCH_SIZE      = 64
 LEARNING_RATE   = 1e-3
-MAX_EPOCHS      = 5
-EARLY_STOP_PATIENCE = 10
-LR_SCHEDULER_PATIENCE = 5
-LR_SCHEDULER_FACTOR   = 0.5
+MAX_EPOCHS      = 50
+EARLY_STOP_PATIENCE = 3
+LR_SCHEDULER_PATIENCE = 3
+LR_SCHEDULER_FACTOR   = 0.3
+MONITOR_METRIC  = "val_f1"  # "val_f1" (Macro-F1, recommended for imbalanced ECG) or "val_loss"
 
 BEST_MODEL_PATH = SAVED_MODELS_DIR / "best_ecg_cnn_bilstm.pt"

@@ -72,7 +72,7 @@ Applied identically during model training and real-time live inference:
 
 ---
 
-## 6. Model Architecture
+## 6. Model Architecture & Training
 - **Input**: $(B, 1, 2500)$ — 10 seconds of Lead-II ECG @ 250 Hz.
 - **1D CNN Feature Extractor (4 Blocks)**:
   - Block 1: `Conv1d(1, 32, k=15, s=2, p=7)` + BatchNorm + ReLU + MaxPool(2) $\rightarrow L=625$
@@ -82,6 +82,10 @@ Applied identically during model training and real-time live inference:
 - **Temporal Sequence Modeling**: 2-layer Bidirectional LSTM (hidden dimension 128) with Global Average Pooling $\rightarrow (B, 256)$.
 - **Classification Head**: `Linear(256, 64)` $\rightarrow$ ReLU $\rightarrow$ Dropout(0.3) $\rightarrow$ `Linear(64, 5)`.
 - **Total Parameters**: 782,213.
+- **Optimization & Metric Monitoring**:
+  - Balanced class weights for imbalanced clinical distribution.
+  - Checkpointing & Early Stopping default to `MONITOR_METRIC="val_f1"` (`mode="max"`, patience=3) to preserve best discrete classification checkpoints.
+  - Per-epoch training & validation metric tracking (`loss`, `accuracy`, `macro_f1`). Checkpoints persist `train_metrics`, `val_metrics`, and complete 6-metric `history`.
 
 ---
 
@@ -89,8 +93,10 @@ Applied identically during model training and real-time live inference:
 - **System Health Badges**:
   - **Hardware Connection**: Displays active port and baud rate (e.g. `COM5 Connected (115200)`) or `Mock Mode`.
   - **Lead-Off Detection**: Instant visual alert (`⚠️ Lead-Off!`) if an electrode detaches from skin.
-  - **Real-Time Sampling Rate**: Measures incoming packets per second (target: `250.0 Hz`).
+  - **Real-Time Sampling Rate**: Measures incoming packets per second (target: `250.0 Hz`), dynamically falling to 0.0 Hz if stream halts.
   - **Model Status**: Confirms model weights loaded on CPU/CUDA.
+- **Diagnostic Troubleshooting Box**:
+  - Automatically pops up actionable troubleshooting hints (cable data support, baud rate, COM selection) if "No Incoming Bytes" is detected.
 - **10-Second Warmup & Calibration Tracker**:
   - Displays a live progress bar (`0.0s / 10.0s`) while accumulating the initial 2500-sample clinical diagnostic window.
   - Automatically transitions to continuous inference (2-second sliding stride) once calibrated.
@@ -149,7 +155,7 @@ python run_live.py --port COM5 --http-port 8080 --device cuda
 │   └── N5_Training.ipynb
 ├── docs/                         # Architecture, Design, Tasks, PRD
 ├── firmware/
-│   └── esp32_ad8232_250hz/       # ESP32 250 Hz hardware timer sketch
+│   └── esp32_ad8232_250hz/       # ESP32 250 Hz non-blocking micros() sketch + heartbeat LED
 ├── static/
 │   └── index.html                # Professional live telemetry dashboard
 ├── run_live.py                   # Unified CLI runner
