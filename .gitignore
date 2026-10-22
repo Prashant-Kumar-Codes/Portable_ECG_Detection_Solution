@@ -1,4 +1,4 @@
 Dataset/ecg_1_lead_dataset/
 *.npz
-*__pycache__/
+__pycache__/
 *.cpython-312.pyc
