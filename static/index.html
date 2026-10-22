@@ -551,6 +551,12 @@
           <span class="diag-val" id="diagUptime">0s</span>
         </div>
       </div>
+      <div id="noBytesHint" style="display:none; margin-top:12px; padding:10px 12px; font-size:11.5px; line-height:1.4; color:#fca5a5; background:rgba(239, 68, 68, 0.1); border-left:3px solid var(--status-err); border-radius:4px;">
+        <strong>No Bytes Received:</strong><br />
+        • Ensure USB cable supports <em>data</em> (not charge-only).<br />
+        • Check COM port in Windows Device Manager.<br />
+        • Verify baud rate is 115200 in your sketch.
+      </div>
     </aside>
   </main>
 
@@ -783,16 +789,19 @@
       document.getElementById("diagSamples").textContent = (s.samples_received || totalSamples).toLocaleString();
 
       const timeSinceSample = (Date.now() - lastSampleTime) / 1000;
-      const dataState = document.getElementById("diagDataState");
+      const hintEl = document.getElementById("noBytesHint");
       if (s.hardware_connected && rateVal > 50) {
         dataState.textContent = "Active (Streaming)";
         dataState.style.color = "var(--status-ok)";
+        if (hintEl) hintEl.style.display = "none";
       } else if (s.mode === "mock") {
         dataState.textContent = "Active (Mock 250Hz)";
         dataState.style.color = "var(--status-warn)";
+        if (hintEl) hintEl.style.display = "none";
       } else {
         dataState.textContent = "No Incoming Bytes";
         dataState.style.color = "var(--status-err)";
+        if (hintEl) hintEl.style.display = "block";
       }
     }
 

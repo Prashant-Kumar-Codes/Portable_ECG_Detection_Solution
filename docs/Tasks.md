@@ -35,15 +35,15 @@
 ## Phase 6: Real-Time Hardware Inference Server [DONE]
 - [x] Modules/inference.py — InferenceEngine: loads .pt checkpoint, preprocess + forward pass, returns class/confidence/probs
 - [x] Modules/inference.py — Lead-off detection awareness: auto-routes to Noise / Artifact with lead_off flag
-- [x] Modules/serial_reader.py — SerialReader: thread-safe 2500-sample ring buffer; real ESP32 serial + mock synthetic-ECG fallback
+- [x] Modules/serial_reader.py — SerialReader: thread-safe 2500-sample ring buffer, DTR/RTS line control, auto-reconnect on disconnect, active liveness rate tracking
 - [x] Modules/serial_reader.py — Multi-format parser: supports CSV ("1534,0"), JSON ({"v":...,"lo":...}), and plain int values
 - [x] Modules/serial_reader.py — Health telemetry: tracks hardware connection state, sample rate (Hz), and samples received
 - [x] Modules/server.py — FastAPI: GET / serves dashboard, WS /ws/ecg streams ECG + predictions every 2 sec + status heartbeat
 - [x] static/index.html — Dashboard: dynamic auto-scaling Chart.js ECG waveform + real-time health diagnostic pills
 - [x] static/index.html — 10-Second Warmup Tracker: live progress bar (0-10s) with calibration state transition
 - [x] static/index.html — Signal metrics: Live ADC, Peak-to-Peak (Vpp), baseline, and estimated BPM ticker
-- [x] run_live.py — Single entry point: CLI args, auto port collision resolution (WinError 10048 guard), auto-opens browser
-- [x] firmware/esp32_ad8232_250hz.ino — 250 Hz hardware timer ISR, streams sample frames @ 115200 baud (fixed syntax typo)
+- [x] run_live.py — Single entry point: CLI args, auto USB port detection (Bluetooth filter), port collision resolution, auto-opens browser
+- [x] firmware/esp32_ad8232_250hz.ino — Non-blocking 250 Hz micros() loop + GPIO 2 heartbeat LED; eliminated fatal analogRead in ISR
 - [x] requirements.txt — All runtime dependencies (torch, numpy, scipy, fastapi, uvicorn, pyserial)
 
 ## Phase 7: Next Steps (TODO after the hardware part work well)

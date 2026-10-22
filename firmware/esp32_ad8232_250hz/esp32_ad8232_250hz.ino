@@ -22,54 +22,48 @@
  * The Python SerialReader in Modules/serial_reader.py parses this JSON format.
  */
 
-#define ECG_PIN    34   // ADC1_CH6 — AD8232 OUTPUT
-#define LO_PLUS    32   // AD8232 LO+ (lead-off detection)
-#define LO_MINUS   33   // AD8232 LO- (lead-off detection)
+#define ECG_PIN       34   // ADC1_CH6 — AD8232 OUTPUT
+#define LO_PLUS       32   // AD8232 LO+ (lead-off detection)
+#define LO_MINUS      33   // AD8232 LO- (lead-off detection)
+#define LED_PIN        2   // Built-in status LED (ESP32 GPIO 2)
 
-// Timer handle
-hw_timer_t* timer = NULL;
-portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
-
-// Volatile flags set in ISR
-volatile bool sampleReady = false;
-volatile int  adcValue    = 0;
-volatile bool leadOff     = false;
-
-// ---- Timer ISR — called at 250 Hz ----
-void IRAM_ATTR onTimer() {
-  portENTER_CRITICAL_ISR(&timerMux);
-  adcValue    = analogRead(ECG_PIN);
-  leadOff     = (digitalRead(LO_PLUS) == HIGH) || (digitalRead(LO_MINUS) == HIGH);
-  sampleReady = true;
-  portEXIT_CRITICAL_ISR(&timerMux);
-}
+// Precise 250 Hz non-blocking timer: 1,000,000 us / 250 = 4,000 us
+const unsigned long SAMPLE_INTERVAL_US = 4000;
+unsigned long lastSampleUs = 0;
+unsigned long lastHeartbeatMs = 0;
+bool ledState = false;
 
 void setup() {
   Serial.begin(115200);
 
   pinMode(LO_PLUS,  INPUT);
   pinMode(LO_MINUS, INPUT);
-  analogReadResolution(12);   // 12-bit ADC (0-4095)
-  analogSetAttenuation(ADC_11db);  // full 0-3.3V range
+  pinMode(LED_PIN,  OUTPUT);
 
-  // Hardware timer 0, prescaler 80 -> 1 MHz tick
-  // Period: 1,000,000 / 250 = 4000 ticks = 4 ms -> 250 Hz
-  timer = timerBegin(0, 80, true);
-  timerAttachInterrupt(timer, &onTimer, true);
-  timerAlarmWrite(timer, 4000, true);
-  timerAlarmEnable(timer);
+  analogReadResolution(12);        // 12-bit ADC (0-4095)
+  analogSetAttenuation(ADC_11db);  // Full 0-3.3V range
+
+  // Wait briefly for serial connection and output ready beacon
+  delay(200);
+  Serial.println("{\"msg\":\"ECG_READY\",\"fs\":250}");
+  lastSampleUs = micros();
 }
 
 void loop() {
-  if (sampleReady) {
-    int   v  = 0;
-    bool  lo = false;
+  unsigned long currentUs = micros();
 
-    portENTER_CRITICAL(&timerMux);
-    v  = adcValue;
-    lo = leadOff;
-    sampleReady = false;
-    portEXIT_CRITICAL(&timerMux);
+  // Trigger at exact 4000 us (250 Hz) intervals
+  if (currentUs - lastSampleUs >= SAMPLE_INTERVAL_US) {
+    lastSampleUs += SAMPLE_INTERVAL_US;
+
+    // Guard against timer drift if loop was briefly delayed
+    if (currentUs - lastSampleUs > SAMPLE_INTERVAL_US) {
+      lastSampleUs = currentUs;
+    }
+
+    // Safe ADC read outside ISR context (prevents ESP32 Guru Meditation panics)
+    int  v  = analogRead(ECG_PIN);
+    bool lo = (digitalRead(LO_PLUS) == HIGH) || (digitalRead(LO_MINUS) == HIGH);
 
     // Stream compact JSON line: {"v":2048,"lo":0}
     Serial.print("{\"v\":");
@@ -77,5 +71,13 @@ void loop() {
     Serial.print(",\"lo\":");
     Serial.print(lo ? 1 : 0);
     Serial.println("}");
+  }
+
+  // Visual heartbeat: toggle LED every 500 ms to confirm firmware is running
+  unsigned long currentMs = millis();
+  if (currentMs - lastHeartbeatMs >= 500) {
+    lastHeartbeatMs = currentMs;
+    ledState = !ledState;
+    digitalWrite(LED_PIN, ledState ? HIGH : LOW);
   }
 }
