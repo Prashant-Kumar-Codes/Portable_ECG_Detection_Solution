@@ -28,7 +28,7 @@ from config import (
     LR_SCHEDULER_FACTOR, BEST_MODEL_PATH, OUTPUT_DATA_DIR,
     MONITOR_METRIC,
 )
-from model import ECGCNNBiLSTM, build_model
+from model import ECGCNNBiLSTM, build_model, checkpoint_mismatches
 from dataset_builder import ECGWindowDataset
 
 logger = logging.getLogger(__name__)
@@ -266,32 +266,46 @@ class Trainer:
         """
         # Guard: Check if model checkpoint already exists to conserve compute resources
         if self.skip_if_exists and not force_retrain and self.save_path.exists():
-            logger.info(
-                f"Checkpoint already exists at {self.save_path}. "
-                "Skipping training to conserve compute resources. Evaluating existing checkpoint on test set..."
-            )
-            _, _, test_loader, train_ds = self._build_loaders()
             model = build_model(self.device)
             checkpoint = torch.load(self.save_path, map_location=self.device)
-            model.load_state_dict(checkpoint["model_state"])
-            if "val_metrics" in checkpoint:
-                vm = checkpoint["val_metrics"]
-                tm = checkpoint.get("train_metrics", {})
-                logger.info(
-                    f"Saved Checkpoint Performance (Epoch {checkpoint.get('epoch', '?')}):\n"
-                    f"  Train: loss={tm.get('loss', 0.0):.4f} | acc={tm.get('accuracy', 0.0):.4f} | f1={tm.get('macro_f1', 0.0):.4f}\n"
-                    f"  Val:   loss={vm.get('loss', 0.0):.4f} | acc={vm.get('accuracy', 0.0):.4f} | f1={vm.get('macro_f1', 0.0):.4f}"
-                )
-            test_metrics = evaluate(model, test_loader, criterion, self.device)
-            logger.info(
-                f"\nLoaded Checkpoint Test Results:\n"
-                f"  Loss     : {test_metrics['loss']:.4f}\n"
-                f"  Accuracy : {test_metrics['accuracy']:.4f}\n"
-                f"  Macro-F1 : {test_metrics['macro_f1']:.4f}\n"
-                f"Confusion Matrix:\n{test_metrics['confusion_matrix']}"
+            state_dict = checkpoint.get(
+                "model_state",
+                checkpoint.get("model_state_dict", checkpoint),
             )
-            self._history = checkpoint.get("history", {})
-            return test_metrics
+            mismatches = checkpoint_mismatches(model, state_dict)
+            if mismatches:
+                logger.warning(
+                    f"Existing checkpoint at {self.save_path} does not match the current "
+                    "model architecture; training a new checkpoint instead. "
+                    + " | ".join(mismatches[:3])
+                )
+            else:
+                logger.info(
+                    f"Checkpoint already exists at {self.save_path}. "
+                    "Skipping training to conserve compute resources. Evaluating existing checkpoint..."
+                )
+                _, _, test_loader, train_ds = self._build_loaders()
+                model.load_state_dict(state_dict)
+                class_weights = compute_class_weights(train_ds).to(self.device)
+                criterion = nn.CrossEntropyLoss(weight=class_weights)
+                if "val_metrics" in checkpoint:
+                    vm = checkpoint["val_metrics"]
+                    tm = checkpoint.get("train_metrics", {})
+                    logger.info(
+                        f"Saved Checkpoint Performance (Epoch {checkpoint.get('epoch', '?')}):\n"
+                        f"  Train: loss={tm.get('loss', 0.0):.4f} | acc={tm.get('accuracy', 0.0):.4f} | f1={tm.get('macro_f1', 0.0):.4f}\n"
+                        f"  Val:   loss={vm.get('loss', 0.0):.4f} | acc={vm.get('accuracy', 0.0):.4f} | f1={vm.get('macro_f1', 0.0):.4f}"
+                    )
+                test_metrics = evaluate(model, test_loader, criterion, self.device)
+                logger.info(
+                    f"\nLoaded Checkpoint Test Results:\n"
+                    f"  Loss     : {test_metrics['loss']:.4f}\n"
+                    f"  Accuracy : {test_metrics['accuracy']:.4f}\n"
+                    f"  Macro-F1 : {test_metrics['macro_f1']:.4f}\n"
+                    f"Confusion Matrix:\n{test_metrics['confusion_matrix']}"
+                )
+                self._history = checkpoint.get("history", {})
+                return test_metrics
 
         train_loader, val_loader, test_loader, train_ds = self._build_loaders()
 

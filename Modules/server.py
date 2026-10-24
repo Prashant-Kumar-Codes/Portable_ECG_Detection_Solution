@@ -115,6 +115,7 @@ def create_app(
     async def ws_ecg(websocket: WebSocket):
         await websocket.accept()
         logger.info("WebSocket client connected.")
+        subscription_id = reader.subscribe()
 
         last_prediction = None
         pending = 0  # samples received since last inference
@@ -123,7 +124,7 @@ def create_app(
         try:
             import time
             while True:
-                new_samples = reader.pop_new_samples()
+                new_samples = reader.pop_new_samples(subscription_id)
                 now = time.time()
 
                 if new_samples:
@@ -194,5 +195,7 @@ def create_app(
                 await websocket.close()
             except Exception:
                 pass
+        finally:
+            reader.unsubscribe(subscription_id)
 
     return app

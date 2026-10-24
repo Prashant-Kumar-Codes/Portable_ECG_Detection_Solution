@@ -124,16 +124,16 @@ Mapped from VitalDB `rhythm_label` and `bad_signal_quality`:
 ## 4. Deep Learning Model Specification (`ECG_CNN_BiLSTM`)
 - **Framework:** PyTorch
 - **Stage 1 (1D CNN Feature Extractor):**
-  - ConvBlock 1: `Conv1d(1, 32, k=15, s=2, p=7)` + `BatchNorm1d` + `ReLU` + `MaxPool1d(2, 2)` -> `L=625`
-  - ConvBlock 2: `Conv1d(32, 64, k=7, s=1, p=3)` + `BatchNorm1d` + `ReLU` + `MaxPool1d(2, 2)` -> `L=312`
-  - ConvBlock 3: `Conv1d(64, 128, k=5, s=1, p=2)` + `BatchNorm1d` + `ReLU` + `MaxPool1d(2, 2)` -> `L=156`
-  - ConvBlock 4: `Conv1d(128, 128, k=3, s=1, p=1)` + `BatchNorm1d` + `ReLU` + `MaxPool1d(2, 2)` -> `L=78`
+  - ConvBlock 1: `Conv1d(1, 64, k=15, s=2, p=7)` + `BatchNorm1d` + `ReLU` + `MaxPool1d(2, 2)` -> `L=625`
+  - ConvBlock 2: `Conv1d(64, 112, k=7, s=1, p=3)` + `BatchNorm1d` + `ReLU` + `MaxPool1d(2, 2)` -> `L=312`
+  - ConvBlock 3: `Conv1d(112, 164, k=5, s=1, p=2)` + `BatchNorm1d` + `ReLU` + `MaxPool1d(2, 2)` -> `L=156`
+  - ConvBlock 4: `Conv1d(164, 164, k=3, s=1, p=1)` + `BatchNorm1d` + `ReLU` + `MaxPool1d(2, 2)` -> `L=78`
 - **Stage 2 (Temporal Sequence Modeling):**
-  - Permute `(B, 128, 78)` -> `(B, 78, 128)`
-  - `nn.LSTM(input_size=128, hidden_size=128, num_layers=2, batch_first=True, bidirectional=True, dropout=0.3)`
-  - Global Average Pooling over time dimension (`dim=1`) -> `(B, 256)`
+  - Permute `(B, 164, 78)` -> `(B, 78, 164)`
+  - `nn.LSTM(input_size=164, hidden_size=164, num_layers=3, batch_first=True, bidirectional=True, dropout=0.3)`
+  - Global Average Pooling over time dimension (`dim=1`) -> `(B, 328)`
 - **Stage 3 (Classifier Head):**
-  - `Linear(256, 64)` -> `ReLU` -> `Dropout(0.3)` -> `Linear(64, 5)`
+  - `Linear(328, 78)` -> `ReLU` -> `Dropout(0.3)` -> `Linear(78, 5)`
 - **Validation Strategy:** Strict patient-wise split by `case_id` (80% Train, 10% Val, 10% Test) with class-weighted `CrossEntropyLoss`.
 
 ## 5. Hardware & Full-Stack Integration Contract

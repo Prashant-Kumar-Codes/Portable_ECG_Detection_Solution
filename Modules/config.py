@@ -96,10 +96,10 @@ MIN_VALID_FRAC = 0.50
 # ---------------------------------------------------------------------------
 # Model hyper-parameters
 # ---------------------------------------------------------------------------
-LSTM_HIDDEN_SIZE = 128
-LSTM_NUM_LAYERS  = 2
+LSTM_HIDDEN_SIZE = 164
+LSTM_NUM_LAYERS  = 3
 LSTM_DROPOUT     = 0.3
-FC_HIDDEN_SIZE   = 64
+FC_HIDDEN_SIZE   = 78
 CLASSIFIER_DROPOUT = 0.3
 
 # ---------------------------------------------------------------------------

@@ -55,6 +55,8 @@ The Python acquisition engine automatically detects and parses any of the follow
    ```json
    {"v": 2048, "lo": 0}
    ```
+   Signal fields `v`, `ecg`, `val`, `value`, `adc`, `raw`, and `signal` are supported (case-insensitively). Lead-off fields `lo`, `lead_off`, `leads_off`, and `leadoff` accept boolean, numeric, or common string values.
+   JSON objects without a recognized signal field are skipped instead of being treated as zero-valued ECG samples.
 
 3. **Plain Raw ADC Integers**:
    ```text
@@ -130,6 +132,19 @@ python run_live.py --port /dev/ttyUSB0
 python run_live.py --port COM5 --http-port 8080 --device cuda
 ```
 *Note: If port 8000 is busy, `run_live.py` automatically binds to the next free port and opens the browser.*
+
+### Retrain After Changing Model Sizes
+
+The live server checkpoint must be trained with the current architecture. If CNN/LSTM
+sizes have changed, retrain from the cached dataset before starting `run_live.py`:
+
+```powershell
+py -c "import sys; sys.path.insert(0, 'Modules'); from train import Trainer; Trainer(skip_if_exists=False).run(force_retrain=True)"
+```
+
+This saves new weights to `Dataset/Output_Data/saved_models/best_ecg_cnn_bilstm.pt`.
+The training pipeline checks existing checkpoint shapes and will not silently skip
+training when the checkpoint was made for an older model architecture.
 
 ---
 

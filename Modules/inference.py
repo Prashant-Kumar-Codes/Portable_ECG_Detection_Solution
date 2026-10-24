@@ -23,7 +23,7 @@ import torch
 import torch.nn.functional as F
 
 from config import BEST_MODEL_PATH, CLASS_NAMES
-from model import ECGCNNBiLSTM, build_model
+from model import ECGCNNBiLSTM, build_model, checkpoint_mismatches
 from preprocessing import preprocess_ecg_window
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,18 @@ class InferenceEngine:
             state_dict = checkpoint.get("model_state", checkpoint.get("model_state_dict", checkpoint))
         else:
             state_dict = checkpoint
+        mismatches = checkpoint_mismatches(model, state_dict)
+        if mismatches:
+            details = "\n  ".join(mismatches)
+            raise RuntimeError(
+                f"Checkpoint '{model_path}' was trained with a different ECGCNNBiLSTM "
+                f"architecture and cannot be loaded into the current model:\n  {details}\n"
+                "Keep the current model sizes and retrain it using the current architecture. "
+                "From the project root run:\n"
+                "  py -c \"import sys; sys.path.insert(0, 'Modules'); "
+                "from train import Trainer; "
+                "Trainer(skip_if_exists=False).run(force_retrain=True)\""
+            )
         model.load_state_dict(state_dict)
         model.eval()
         logger.info(f"Model loaded from '{model_path}' on device '{self.device}'.")

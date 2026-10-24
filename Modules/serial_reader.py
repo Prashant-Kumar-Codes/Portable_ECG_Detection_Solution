@@ -59,6 +59,32 @@ def _synthetic_ecg_sample(t: float) -> float:
     return p + qrs + t_wave + noise
 
 
+def _json_flag(value) -> bool:
+    """Interpret common JSON boolean and numeric representations."""
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"", "0", "false", "no", "off"}:
+            return False
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        try:
+            numeric = float(normalized)
+        except ValueError as exc:
+            raise ValueError(f"Invalid lead-off flag: {value!r}") from exc
+        if not math.isfinite(numeric):
+            raise ValueError(f"Invalid lead-off flag: {value!r}")
+        return numeric != 0.0
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        if not math.isfinite(value):
+            raise ValueError(f"Invalid lead-off flag: {value!r}")
+        return value != 0
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"Invalid lead-off flag: {value!r}")
+
+
 class SerialReader:
     """Thread-safe ECG acquisition buffer.
 
@@ -73,7 +99,8 @@ class SerialReader:
 
     def __init__(self, port: Optional[str] = None, baud: int = 115_200):
         self._buffer: deque = deque(maxlen=WINDOW_SAMPLES)
-        self._new_samples: list = []
+        self._subscribers: dict[int, list[float]] = {}
+        self._next_subscriber_id = 0
         self._lock     = threading.Lock()
         self._lead_off = False
         self._running  = False
@@ -124,16 +151,31 @@ class SerialReader:
         with self._lock:
             return np.array(self._buffer, dtype=np.float32)
 
-    def pop_new_samples(self) -> list:
-        """Return and clear all samples received since the last call.
+    def subscribe(self) -> int:
+        """Create a sample subscription and return its identifier."""
+        with self._lock:
+            subscriber_id = self._next_subscriber_id
+            self._next_subscriber_id += 1
+            self._subscribers[subscriber_id] = []
+            return subscriber_id
+
+    def unsubscribe(self, subscriber_id: int) -> None:
+        """Remove a sample subscription."""
+        with self._lock:
+            self._subscribers.pop(subscriber_id, None)
+
+    def pop_new_samples(self, subscriber_id: int) -> list[float]:
+        """Return and clear samples received since this subscriber last called.
 
         Returns
         -------
         list of float — raw ADC values (may be empty if called too frequently).
         """
         with self._lock:
-            batch = list(self._new_samples)
-            self._new_samples.clear()
+            if subscriber_id not in self._subscribers:
+                raise KeyError(f"Unknown ECG sample subscription: {subscriber_id}")
+            batch = self._subscribers[subscriber_id]
+            self._subscribers[subscriber_id] = []
             return batch
 
     @property
@@ -176,7 +218,8 @@ class SerialReader:
                 self._initial_fill_done = True
 
             self._buffer.append(value)
-            self._new_samples.append(value)
+            for samples in self._subscribers.values():
+                samples.append(value)
             self._lead_off = lead_off
             self._samples_received += 1
 
@@ -330,7 +373,7 @@ class SerialReader:
 
         Supports:
         - Key-Value pairs: "ECG:3191,LEADS_OFF:0", "ADC=1820, LO=0", etc.
-        - JSON: {"v": 2048, "lo": 0} or {"ecg": 2048, "lead_off": 0}
+        - JSON: signal keys v, ecg, val, value, adc, raw, or signal
         - Delimited CSV: "1534,0" or "1534, 0" or "1534, 0, 0"
         - Plain single float/int: "1534"
         """
@@ -338,20 +381,37 @@ class SerialReader:
         if not line:
             raise ValueError("Empty line")
 
-        # 1. JSON format: {"v": 2048, "lo": 0}
+        # 1. JSON format with common signal and lead-off key aliases
         if line.startswith("{") and line.endswith("}"):
             try:
                 data = json.loads(line)
+            except json.JSONDecodeError:
+                data = None
+
+            if isinstance(data, dict):
+                data = {str(key).lower(): value for key, value in data.items()}
                 if "msg" in data:
                     logger.info(f"Microcontroller beacon: {data.get('msg')} (fs={data.get('fs')})")
                     raise ValueError(f"Beacon message: {data.get('msg')}")
-                val = float(data.get("v", data.get("ecg", data.get("val", 0))))
-                lo = bool(data.get("lo", data.get("lead_off", 0)))
+
+                signal_keys = ("v", "ecg", "val", "value", "adc", "raw", "signal")
+                signal_key = next((key for key in signal_keys if key in data), None)
+                if signal_key is None:
+                    raise ValueError("JSON serial frame has no recognized ECG value field")
+
+                try:
+                    val = float(data[signal_key])
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"Invalid ECG value in JSON field {signal_key!r}") from exc
+                if not math.isfinite(val):
+                    raise ValueError(f"Non-finite ECG value in JSON field {signal_key!r}")
+
+                lead_key = next(
+                    (key for key in ("lo", "lead_off", "leads_off", "leadoff") if key in data),
+                    None,
+                )
+                lo = _json_flag(data[lead_key]) if lead_key is not None else False
                 return val, lo
-            except ValueError:
-                raise
-            except Exception:
-                pass
 
         # 2. Key-Value pairs (e.g. "ECG:3191,LEADS_OFF:0" or "ecg=3191,lo=0")
         kv_pairs = re.findall(r"([A-Za-z_]+)\s*[:=]\s*(-?[\d\.]+)", line)

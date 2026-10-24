@@ -12,7 +12,8 @@ Architecture:
 Reference: docs/Architecture.md, docs/Design.md
 """
 
-import torch
+from typing import Mapping
+
 import torch.nn as nn
 from torch import Tensor
 
@@ -79,31 +80,31 @@ class ECGCNNBiLSTM(nn.Module):
     Output shape: (B, NUM_CLASSES) — raw logits (no softmax; use with CrossEntropyLoss)
 
     Stage 1 — CNN Feature Extractor (sequence compression 2500 → 78):
-      CB1: Conv1d(1,  32,  k=15, s=2, p=7)  + BN + ReLU + MaxPool1d(2) → L=625
-      CB2: Conv1d(32, 64,  k=7,  s=1, p=3)  + BN + ReLU + MaxPool1d(2) → L=312
-      CB3: Conv1d(64, 128, k=5,  s=1, p=2)  + BN + ReLU + MaxPool1d(2) → L=156
-      CB4: Conv1d(128,128, k=3,  s=1, p=1)  + BN + ReLU + MaxPool1d(2) → L=78
+      CB1: Conv1d(1,  64,  k=15, s=2, p=7)  + BN + ReLU + MaxPool1d(2) → L=625
+      CB2: Conv1d(64, 112,  k=7,  s=1, p=3)  + BN + ReLU + MaxPool1d(2) → L=312
+      CB3: Conv1d(112,164, k=5,  s=1, p=2)  + BN + ReLU + MaxPool1d(2) → L=156
+      CB4: Conv1d(164,164, k=3,  s=1, p=1)  + BN + ReLU + MaxPool1d(2) → L=78
 
     Stage 2 — BiLSTM Temporal Modelling:
       Permute (B,128,78) → (B,78,128)
-      LSTM(input=128, hidden=128, layers=2, bidirectional=True, dropout=0.3)
+      LSTM(input=164, hidden=164, layers=3, bidirectional=True, dropout=0.3)
       Global Average Pooling over time → (B, 256)
 
     Stage 3 — Classifier Head:
-      Linear(256, 64) → ReLU → Dropout(0.3) → Linear(64, NUM_CLASSES)
+      Linear(328, 78) → ReLU → Dropout(0.3) → Linear(78, NUM_CLASSES)
 
     Parameters
     ----------
     num_classes : int, optional
         Number of output classes. Defaults to config.NUM_CLASSES (5).
     lstm_hidden : int, optional
-        LSTM hidden state size per direction. Defaults to config.LSTM_HIDDEN_SIZE (128).
+        LSTM hidden state size per direction. Defaults to config.LSTM_HIDDEN_SIZE (164).
     lstm_layers : int, optional
-        Number of LSTM layers. Defaults to config.LSTM_NUM_LAYERS (2).
+        Number of LSTM layers. Defaults to config.LSTM_NUM_LAYERS (3).
     lstm_dropout : float, optional
         Dropout between LSTM layers. Defaults to config.LSTM_DROPOUT (0.3).
     fc_hidden : int, optional
-        FC hidden layer size. Defaults to config.FC_HIDDEN_SIZE (64).
+        FC hidden layer size. Defaults to config.FC_HIDDEN_SIZE (78).
     clf_dropout : float, optional
         Dropout in classifier head. Defaults to config.CLASSIFIER_DROPOUT (0.3).
     """
@@ -121,13 +122,13 @@ class ECGCNNBiLSTM(nn.Module):
 
         # ---- Stage 1: CNN feature extractor ----
         self.cnn = nn.Sequential(
-            ConvBlock(1,   32,  kernel_size=15, stride=2, padding=7),   # 2500 → 625
-            ConvBlock(32,  64,  kernel_size=7,  stride=1, padding=3),   # 625  → 312
-            ConvBlock(64,  128, kernel_size=5,  stride=1, padding=2),   # 312  → 156
-            ConvBlock(128, 128, kernel_size=3,  stride=1, padding=1),   # 156  → 78
+            ConvBlock(1,   64, kernel_size=15, stride=2, padding=7),   # 2500 → 625
+            ConvBlock(64,  112,  kernel_size=7,  stride=1, padding=3),   # 625  → 312
+            ConvBlock(112, 164, kernel_size=5,  stride=1, padding=2),   # 312  → 156
+            ConvBlock(164, 164, kernel_size=3,  stride=1, padding=1),   # 156  → 78
         )
 
-        cnn_out_channels = 128   # output channels from last ConvBlock
+        cnn_out_channels = 164   # output channels from last ConvBlock
         # seq_len after CNN = 78 (verified in N4 notebook)
 
         # ---- Stage 2: BiLSTM temporal modelling ----
@@ -139,7 +140,7 @@ class ECGCNNBiLSTM(nn.Module):
             bidirectional=True,
             dropout=lstm_dropout if lstm_layers > 1 else 0.0,
         )
-        lstm_out_dim = lstm_hidden * 2   # 256 (bidirectional)
+        lstm_out_dim = lstm_hidden * 2   # 328 (bidirectional)
 
         # ---- Stage 3: Classifier head ----
         self.classifier = nn.Sequential(
@@ -162,15 +163,15 @@ class ECGCNNBiLSTM(nn.Module):
         logits : Tensor, shape (B, num_classes)
             Raw class scores (use CrossEntropyLoss which applies log-softmax internally).
         """
-        # Stage 1: CNN — (B,1,2500) → (B,128,78)
+        # Stage 1: CNN — (B,1,2500) → (B,164,78)
         cnn_out = self.cnn(x)
 
-        # Stage 2: Permute for LSTM — (B,128,78) → (B,78,128)
+        # Stage 2: Permute for LSTM — (B,164,78) → (B,78,164)
         lstm_in = cnn_out.permute(0, 2, 1)
-        lstm_out, _ = self.lstm(lstm_in)           # (B, 78, 256)
+        lstm_out, _ = self.lstm(lstm_in)           # (B, 78, 328)
 
         # Global average pooling over time dimension
-        pooled = lstm_out.mean(dim=1)              # (B, 256)
+        pooled = lstm_out.mean(dim=1)              # (B, 328)
 
         # Stage 3: Classifier
         logits = self.classifier(pooled)           # (B, num_classes)
@@ -196,3 +197,28 @@ def build_model(device: str = "cpu") -> ECGCNNBiLSTM:
     model = ECGCNNBiLSTM()
     model.to(device)
     return model
+
+
+def checkpoint_mismatches(
+    model: nn.Module,
+    state_dict: Mapping[str, Tensor],
+) -> list[str]:
+    """Describe missing, unexpected, and differently shaped checkpoint weights."""
+    expected = model.state_dict()
+    messages: list[str] = []
+
+    missing = sorted(expected.keys() - state_dict.keys())
+    unexpected = sorted(state_dict.keys() - expected.keys())
+    if missing:
+        messages.append(f"missing keys: {', '.join(missing[:5])}")
+    if unexpected:
+        messages.append(f"unexpected keys: {', '.join(unexpected[:5])}")
+
+    shape_mismatches = [
+        f"{key}: checkpoint {tuple(state_dict[key].shape)} != model {tuple(value.shape)}"
+        for key, value in expected.items()
+        if key in state_dict and state_dict[key].shape != value.shape
+    ]
+    if shape_mismatches:
+        messages.append("shape mismatches: " + "; ".join(shape_mismatches[:5]))
+    return messages
